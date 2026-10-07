@@ -301,10 +301,45 @@ function snippet(text: string | null | undefined, max = 140): string {
 }
 
 /**
+ * Ключ «одинаковости» для схлопывания баннеров.
+ * MM realtime шлёт каждый пост отдельно — без ключа Notification Center
+ * копится стопкой из одного канала. Встречи из двух контуров — один слот.
+ */
+function notifyCollapseKey(it: Item): string {
+  if (it.kind === 'message') {
+    const id = it.id
+    const chIdx = id.indexOf(':channel:')
+    if (chIdx >= 0) return `message:${it.serviceId}:${id.slice(chIdx)}`
+    const postIdx = id.indexOf(':post:')
+    // Посты одного канала: «Имя в #канал» / «Имя в @dm» — хвост после « в ».
+    const room = it.title.match(/\sв\s(.+)$/)?.[1]?.trim()
+    if (room) return `message:${it.serviceId}:room:${room}`
+    if (postIdx >= 0) return `message:${it.serviceId}:${id.slice(0, postIdx)}`
+    return `message:${it.serviceId}:${it.title}`
+  }
+  if (it.kind === 'event' && it.startsAt != null) {
+    return `event:${it.startsAt}:${it.endsAt ?? ''}`
+  }
+  return `${it.kind}:${it.id}`
+}
+
+type NotifyHandlers = {
+  onOpen: (target: NavTarget) => void
+  onJoin: (url: string) => void
+}
+
+let notifyBuf: Item[] = []
+let notifyHandlers: NotifyHandlers | null = null
+let notifyFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Склеить шквал realtime/sync в один тик — иначе каждый пост = свой баннер. */
+const NOTIFY_DEBOUNCE_MS = 1200
+
+/**
  * Системные уведомления о новом в подключённых сервисах.
  *
- * Одно событие — кто и что; пачку сворачиваем в сводку.
- * Клик открывает сервис/раздел (Mattermost — permalink во вкладке).
+ * Одно событие — кто и что; пачку и одинаковые (канал MM, слот встречи)
+ * сворачиваем. Клик открывает сервис/раздел (Mattermost — permalink).
  */
 export function notifyNew(
   all: Item[],
@@ -312,23 +347,51 @@ export function notifyNew(
   onJoin: (url: string) => void
 ): void {
   if (!all.length || !Notification.isSupported()) return
+  if (!getConfig().notifications) return
+
+  notifyBuf.push(...all)
+  notifyHandlers = { onOpen, onJoin }
+  if (notifyFlushTimer) clearTimeout(notifyFlushTimer)
+  notifyFlushTimer = setTimeout(flushNotifyNew, NOTIFY_DEBOUNCE_MS)
+}
+
+function flushNotifyNew(): void {
+  notifyFlushTimer = null
+  const handlers = notifyHandlers
+  const raw = notifyBuf
+  notifyBuf = []
+  notifyHandlers = null
+  if (!handlers || !raw.length || !Notification.isSupported()) return
   const cfg = getConfig()
   if (!cfg.notifications) return
 
   // «Отправленные» и «Черновики» — то, что написали мы сами. Сервер кладёт
   // туда и служебные ответы: приняв встречу, вы получали баннер «Новое письмо —
   // Принято: …», а в «Входящих» его, естественно, не было.
-  const items = all.filter((it) => {
+  const filtered = raw.filter((it) => {
     const folder = it.folder ?? 'inbox'
     return !(it.kind === 'mail' && (folder === 'sent' || folder === 'drafts'))
   })
-  if (!items.length) return
+  if (!filtered.length) return
+
+  // Одинаковые → одна группа (свежий head + count).
+  const groups = new Map<string, Item[]>()
+  for (const it of filtered) {
+    const key = notifyCollapseKey(it)
+    const arr = groups.get(key) ?? []
+    arr.push(it)
+    groups.set(key, arr)
+  }
+  const collapsed = [...groups.entries()].map(([key, list]) => {
+    list.sort((a, b) => b.updatedAt - a.updatedAt)
+    return { key, head: list[0]!, count: list.length }
+  })
 
   const envName = (id: string): string => cfg.envs.find((e) => e.id === id)?.name ?? ''
   const serviceName = (id: string): string => cfg.services.find((s) => s.id === id)?.name ?? ''
 
-  if (items.length === 1) {
-    const it = items[0]!
+  if (collapsed.length === 1) {
+    const { key, head: it, count } = collapsed[0]!
     const where = [serviceName(it.serviceId), envName(it.envId)].filter(Boolean).join(' · ')
     const isEvent = it.kind === 'event'
     const isMessage = it.kind === 'message'
@@ -342,7 +405,7 @@ export function notifyNew(
     const title = isEvent
       ? `Новая встреча${where ? ` — ${where}` : ''}`
       : `${KIND_TITLE[it.kind] ?? 'Обновление'}${where ? ` — ${where}` : ''}`
-    const body = isEvent
+    let body = isEvent
       ? when
         ? `${when} · ${it.title}`
         : it.title
@@ -351,37 +414,51 @@ export function notifyNew(
         : it.author
           ? `${it.author}: ${it.title}`
           : it.title
+    if (count > 1) {
+      body = isMessage
+        ? `${count} в этом канале · ${body}`
+        : isEvent
+          ? body
+          : `${count}: ${body}`
+    }
     const joinUrl = isEvent ? extractMeetingUrl(it) : null
+    // id стабильный — macOS заменяет прошлый баннер той же группы, а не копит.
     const n = new Notification({
+      id: `kontur:${key}`,
+      groupId: key,
       title,
       body,
       silent: false,
       actions: joinUrl ? [{ type: 'button', text: 'Подключиться' }] : undefined
     })
-    n.on('click', () => onOpen(targetFor(it)))
-    if (joinUrl) n.on('action', () => onJoin(joinUrl))
+    n.on('click', () => handlers.onOpen(targetFor(it)))
+    if (joinUrl) n.on('action', () => handlers.onJoin(joinUrl))
     n.show()
     return
   }
 
-  // Сводка по видам: «3 письма, 1 задача».
+  // Несколько разных групп: сводка по видам (уже после схлопывания дублей).
   const byKind = new Map<string, number>()
-  for (const it of items) byKind.set(it.kind, (byKind.get(it.kind) ?? 0) + 1)
+  for (const { head, count } of collapsed) {
+    byKind.set(head.kind, (byKind.get(head.kind) ?? 0) + count)
+  }
   const parts = [...byKind.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([kind, n]) => plural(kind, n))
 
-  const dominant = items.slice().sort((a, b) => {
-    const ca = byKind.get(a.kind) ?? 0
-    const cb = byKind.get(b.kind) ?? 0
+  const dominant = collapsed.slice().sort((a, b) => {
+    const ca = byKind.get(a.head.kind) ?? 0
+    const cb = byKind.get(b.head.kind) ?? 0
     return cb - ca
-  })[0]!
+  })[0]!.head
 
   const n = new Notification({
+    id: 'kontur:batch',
+    groupId: 'kontur:batch',
     title: 'Kontur — новые события',
     body: parts.join(', ')
   })
-  n.on('click', () => onOpen(targetFor(dominant)))
+  n.on('click', () => handlers.onOpen(targetFor(dominant)))
   n.show()
 }
 

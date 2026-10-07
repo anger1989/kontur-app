@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type JSX } from 'react'
-import { Kanban, RefreshCw } from 'lucide-react'
+import { Kanban, Loader2, RefreshCw } from 'lucide-react'
 import type { Item } from '@shared/types'
 import { useStore } from '@/store'
 import { Button } from '@/components/ui/button'
@@ -115,6 +115,8 @@ export function Tasks(): JSX.Element {
   const [projectKey, setProjectKey] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Пока нет ответа board() — не рисуем fallback cat:* (иначе колонки скачут). */
+  const [boardBooting, setBoardBooting] = useState(true)
 
   const jiraServices = (config?.services ?? []).filter((s) => s.kind === 'jira' && s.enabled)
 
@@ -122,25 +124,36 @@ export function Tasks(): JSX.Element {
     void window.kontur.items.query({ kinds: ['task'], limit: 500 }).then(setItems)
   }
 
-  const reloadBoard = useCallback((): void => {
-    void window.kontur.tasks.board().then((b) => {
-      setBoardCols(b.columns)
-      setProjectKey(b.projectKey)
-    })
+  const reloadBoard = useCallback((opts?: { boot?: boolean }): Promise<void> => {
+    // boot: первый заход / смена конфига — лоадер вместо старых/fallback колонок.
+    // silent (sync): оставляем текущую доску на экране.
+    if (opts?.boot) setBoardBooting(true)
+    return window.kontur.tasks
+      .board()
+      .then((b) => {
+        setBoardCols(b.columns)
+        setProjectKey(b.projectKey)
+      })
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : String(e))
+      })
+      .finally(() => {
+        if (opts?.boot) setBoardBooting(false)
+      })
   }, [])
 
   useEffect(() => {
     reloadItems()
-    reloadBoard()
     return window.kontur.items.onChange(() => {
       reloadItems()
     })
-  }, [reloadBoard])
+  }, [])
 
-  // При смене projectKey в настройках — перетянуть колонки.
+  // Первый заход и смена projectKey — лоадер, пока board() не ответит.
+  const jiraProjectSig = jiraServices.map((s) => `${s.id}:${s.options.projectKey ?? ''}`).join('|')
   useEffect(() => {
-    reloadBoard()
-  }, [config, reloadBoard])
+    void reloadBoard({ boot: true })
+  }, [jiraProjectSig, reloadBoard])
 
   const columns: ColumnData[] = useMemo(() => {
     const cols = boardCols.length
@@ -195,7 +208,7 @@ export function Tasks(): JSX.Element {
     try {
       await window.kontur.items.syncNow()
       reloadItems()
-      reloadBoard()
+      await reloadBoard()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -269,6 +282,11 @@ export function Tasks(): JSX.Element {
           <p className="max-w-md text-[13px] text-muted-foreground/80">
             Подключи Jira в настройках контура — сюда попадут задачи, назначенные на тебя.
           </p>
+        </div>
+      ) : boardBooting ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+          <p className="text-[13px] text-muted-foreground/80">Загружаем колонки доски…</p>
         </div>
       ) : items.length === 0 && columns.every((c) => c.cards.length === 0) ? (
         <div className="flex flex-col items-center gap-2 py-16 text-center">

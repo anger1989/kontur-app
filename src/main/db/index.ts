@@ -169,9 +169,21 @@ export function upsertItems(items: Item[]): Item[] {
       body=CASE WHEN length(excluded.body) > 0 THEN excluded.body ELSE items.body END,
       author=excluded.author, state=excluded.state,
       url=excluded.url, updated_at=excluded.updated_at,
-      -- Раз прочитали в приложении — синк не возвращает «непрочитано»/упоминание.
-      unread=CASE WHEN items.unread = 0 THEN 0 ELSE excluded.unread END,
-      mentioned=CASE WHEN items.unread = 0 THEN 0 ELSE excluded.mentioned END,
+      -- Прочитал в приложении → не возвращаем флаг синка (MM mention / MR / почта
+      -- не «прыгают» обратно каждую минуту). Исключение: MM channel:… — тот же
+      -- id при новых непрочитанных, синк должен снова выставить unread.
+      unread=CASE
+        WHEN items.unread = 0
+          AND (items.kind != 'message' OR instr(items.id, ':channel:') = 0)
+          THEN 0
+        ELSE excluded.unread
+      END,
+      mentioned=CASE
+        WHEN items.mentioned = 0
+          AND (items.kind != 'message' OR instr(items.id, ':channel:') = 0)
+          THEN 0
+        ELSE excluded.mentioned
+      END,
       starts_at=excluded.starts_at, ends_at=excluded.ends_at, folder=excluded.folder
   `)
   const tx = conn().transaction((rows: Item[]) => {

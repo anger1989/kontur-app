@@ -73,19 +73,27 @@ export function Today(): JSX.Element {
 
   useEffect(() => {
     const load = (): void => {
-      void window.kontur.items.query({ limit: 500 }).then((list) => {
-        // Письма — только непрочитанные; сегодняшние встречи живут в карусели
-        // сверху и в ленте не дублируются.
-        const day0 = (() => {
-          const d = new Date()
-          d.setHours(0, 0, 0, 0)
-          return d.getTime()
-        })()
-        const day1 = day0 + 86_400_000
-        // Копии встреч из второго контура — одной строкой, как в счётчиках.
+      const day0 = (() => {
+        const d = new Date()
+        d.setHours(0, 0, 0, 0)
+        return d.getTime()
+      })()
+      const day1 = day0 + 86_400_000
+      // Раздельные запросы — иначе свежий кэш вытесняет старые unread из limit.
+      void Promise.all([
+        window.kontur.items.query({ kinds: ['mail'], unreadOnly: true, limit: 1000 }),
+        window.kontur.items.query({ kinds: ['task'], limit: 1000 }),
+        window.kontur.items.query({ kinds: ['review'], limit: 500 }),
+        window.kontur.items.query({ kinds: ['message', 'page'], unreadOnly: true, limit: 500 }),
+        window.kontur.items.query({ kinds: ['message', 'page'], mentionedOnly: true, limit: 500 }),
+        window.kontur.items.query({ kinds: ['event'], limit: 2000 }),
+        window.kontur.items.query({ kinds: ['todo'], limit: 500 })
+      ]).then((chunks) => {
+        const byId = new Map<string, Item>()
+        for (const list of chunks) for (const it of list) byId.set(it.id, it)
         const seenSlots = new Set<string>()
         setItems(
-          list.filter((i) => {
+          [...byId.values()].filter((i) => {
             if (i.kind === 'mail') return i.unread
             if (i.kind === 'message' || i.kind === 'page' || i.kind === 'review') {
               return i.unread || i.mentioned
@@ -95,13 +103,11 @@ export function Today(): JSX.Element {
               const slot = meetingSlotKey(i)
               if (seenSlots.has(slot)) return false
               seenSlots.add(slot)
-              // Сегодняшние живут в карусели сверху.
               if (i.startsAt >= day0 && i.startsAt < day1) return false
-              // Дальше недели не показываем: повторяющиеся встречи развёрнуты
-              // до конца горизонта и иначе засыпают ленту экземплярами на
-              // полгода вперёд.
               return i.startsAt >= day1 && i.startsAt < day0 + 8 * 86_400_000
             }
+            if (i.kind === 'task') return true
+            if (i.kind === 'todo') return true
             return true
           })
         )

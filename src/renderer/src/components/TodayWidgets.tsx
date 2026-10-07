@@ -178,6 +178,7 @@ function attentionKind(it: Item): AttentionKind | null {
   // Закрытые и отменённые задачи внимания не требуют — им здесь не место.
   if (it.kind === 'task') return isTaskClosed(it) ? null : 'task'
   if (it.kind === 'mail') return it.unread ? 'mail' : null
+  // MM / MR / wiki: после markRead (unread+mentioned=0) пропадают из списка.
   if (it.kind === 'message' || it.kind === 'page' || it.kind === 'review') {
     return it.unread || it.mentioned ? 'note' : null
   }
@@ -185,14 +186,26 @@ function attentionKind(it: Item): AttentionKind | null {
 }
 
 /** Требует внимания: непрочитанные письма/упоминания и задачи, с фильтром по виду и прокруткой. */
-function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: number } = {}): JSX.Element | null {
+function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: number } = {}): JSX.Element {
   const { config, openItem } = useStore()
   const [items, setItems] = useState<Item[]>([])
   const [filter, setFilter] = useState<AttentionKind | null>(null)
 
   useEffect(() => {
     const load = (): void => {
-      void window.kontur.items.query({ limit: 500 }).then(setItems)
+      // Не один query(limit:500) по всему кэшу: свежие прочитанные задачи/события
+      // вытесняли старые unread MM/почту из окна — виджет молча недобирал ленту.
+      void Promise.all([
+        window.kontur.items.query({ kinds: ['mail'], unreadOnly: true, limit: 1000 }),
+        window.kontur.items.query({ kinds: ['task'], limit: 1000 }),
+        window.kontur.items.query({ kinds: ['review'], limit: 500 }),
+        window.kontur.items.query({ kinds: ['message', 'page'], unreadOnly: true, limit: 500 }),
+        window.kontur.items.query({ kinds: ['message', 'page'], mentionedOnly: true, limit: 500 })
+      ]).then((chunks) => {
+        const byId = new Map<string, Item>()
+        for (const list of chunks) for (const it of list) byId.set(it.id, it)
+        setItems([...byId.values()])
+      })
     }
     load()
     return window.kontur.items.onChange(load)
@@ -213,79 +226,83 @@ function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: nu
     return c
   }, [all])
 
-  const shown = (filter ? all.filter((x) => x.kind === filter) : all).slice(0, 40)
-
-  if (!all.length) return null
+  const shown = filter ? all.filter((x) => x.kind === filter) : all
 
   const Wrap = bare ? 'div' : Glass
   return (
     <Wrap className="w-full p-3">
       <WidgetHeader title="Требует внимания" count={all.length} />
 
-      {/* Компактные фильтры — только те виды, которых реально есть хоть одна штука. */}
-      <div className="mb-1.5 flex flex-wrap gap-1 px-1">
-        <button
-          type="button"
-          onClick={() => setFilter(null)}
-          className={cn(
-            'desk-chip rounded-full px-2 py-0.5 text-[11px] transition-[box-shadow,color]',
-            filter === null
-              ? 'desk-chip-on font-medium text-foreground'
-              : 'text-muted-foreground hover:text-foreground'
-          )}
-        >
-          Все
-        </button>
-        {(Object.keys(KIND_LABEL) as AttentionKind[])
-          .filter((k) => counts[k] > 0)
-          .map((k) => (
+      {!all.length ? (
+        <p className="px-1 py-3 text-[13px] text-muted-foreground">Ничего не требует внимания</p>
+      ) : (
+        <>
+          {/* Компактные фильтры — только те виды, которых реально есть хоть одна штука. */}
+          <div className="mb-1.5 flex flex-wrap gap-1 px-1">
             <button
-              key={k}
               type="button"
-              onClick={() => setFilter(filter === k ? null : k)}
+              onClick={() => setFilter(null)}
               className={cn(
                 'desk-chip rounded-full px-2 py-0.5 text-[11px] transition-[box-shadow,color]',
-                filter === k
+                filter === null
                   ? 'desk-chip-on font-medium text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              {KIND_LABEL[k]} {counts[k]}
+              Все
             </button>
-          ))}
-      </div>
+            {(Object.keys(KIND_LABEL) as AttentionKind[])
+              .filter((k) => counts[k] > 0)
+              .map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setFilter(filter === k ? null : k)}
+                  className={cn(
+                    'desk-chip rounded-full px-2 py-0.5 text-[11px] transition-[box-shadow,color]',
+                    filter === k
+                      ? 'desk-chip-on font-medium text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {KIND_LABEL[k]} {counts[k]}
+                </button>
+              ))}
+          </div>
 
-      {/* Свой скролл — список может быть куда длиннее шести строк. Высоту задаёт
-          стол: на низком окне длинный список не должен распирать колонку. */}
-      <div className="space-y-px overflow-y-auto" style={{ maxHeight: listHeight ?? 288 }}>
-        {shown.map(({ it }) => {
-          const Icon = KIND_ICON[it.kind] ?? FileText
-          const accent = config?.envs.find((e) => e.id === it.envId)?.accent
-          const serviceName = config?.services.find((s) => s.id === it.serviceId)?.name
-          return (
-            <button
-              key={it.id}
-              type="button"
-              onClick={() => openItem(it)}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-foreground/5"
-            >
-              <span className="desk-tile flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground">
-                <Icon className="size-3.5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium">{it.title}</span>
-                <span className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-                  <span className="size-1.5 shrink-0 rounded-full" style={{ background: accent }} />
-                  <span className="truncate">{serviceName ?? it.serviceId}</span>
-                </span>
-              </span>
-              <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-                {shortTime(it.updatedAt)}
-              </span>
-            </button>
-          )
-        })}
-      </div>
+          {/* Свой скролл — список может быть куда длиннее шести строк. Высоту задаёт
+              стол: на низком окне длинный список не должен распирать колонку. */}
+          <div className="space-y-px overflow-y-auto" style={{ maxHeight: listHeight ?? 288 }}>
+            {shown.map(({ it }) => {
+              const Icon = KIND_ICON[it.kind] ?? FileText
+              const accent = config?.envs.find((e) => e.id === it.envId)?.accent
+              const serviceName = config?.services.find((s) => s.id === it.serviceId)?.name
+              return (
+                <button
+                  key={it.id}
+                  type="button"
+                  onClick={() => openItem(it)}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-foreground/5"
+                >
+                  <span className="desk-tile flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground">
+                    <Icon className="size-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium">{it.title}</span>
+                    <span className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+                      <span className="size-1.5 shrink-0 rounded-full" style={{ background: accent }} />
+                      <span className="truncate">{serviceName ?? it.serviceId}</span>
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                    {shortTime(it.updatedAt)}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
     </Wrap>
   )
 }
