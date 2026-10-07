@@ -1,0 +1,47 @@
+appId: dev.golovko.kontur
+productName: Kontur
+directories:
+  buildResources: build
+files:
+  - out/**
+  - package.json
+# snx-rs (AGPL): бинари из vendor/snx-rs → Resources/snx-rs (см. scripts/fetch-snx-rs.sh)
+extraResources:
+  - from: vendor/snx-rs
+    to: snx-rs
+    filter:
+      - '**/*'
+      - '!README.md'
+asarUnpack:
+  - "**/*.node"
+  - "**/better-sqlite3/prebuilds/**"
+  - "**/node-pty/**"
+publish:
+  provider: github
+  owner: anger1989
+  repo: kontur-app
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  target:
+    - dmg
+  # Ad-hoc подпись; для silent auto-update нужен Developer ID + notarize.
+  # Identifier и Info.plist чинит scripts/afterPack.cjs — иначе macOS не
+  # показывает Kontur в Системных настройках → Уведомления.
+  identity: null
+  extendInfo:
+    # Чтобы Notification Center показывал баннеры Kontur.
+    NSUserNotificationAlertStyle: alert
+afterPack: scripts/afterPack.cjs
+linux:
+  icon: build/icon.png
+  category: Office
+  maintainer: Kontur
+  target:
+    - AppImage
+    - deb
+  desktop:
+    entry:
+      Name: Kontur
+      Comment: Единое рабочее место для двух изолированных контуров
+      Categories: Office;ProjectManagement;

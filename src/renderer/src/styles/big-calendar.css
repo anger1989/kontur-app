@@ -1,0 +1,198 @@
+/*
+ * react-big-calendar под тему Kontur. Базовые стили библиотеки рассчитаны на
+ * светлый фон с серыми #ddd-рамками — переводим всё на токены темы, чтобы
+ * сетка одинаково выглядела в светлой и тёмной теме.
+ */
+.kontur-calendar {
+  font-size: 12px;
+  color: var(--foreground);
+}
+
+/* Рамки сетки */
+.kontur-calendar .rbc-month-view,
+.kontur-calendar .rbc-time-view,
+.kontur-calendar .rbc-agenda-view {
+  border-color: var(--border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: var(--background);
+}
+.kontur-calendar .rbc-header,
+.kontur-calendar .rbc-header + .rbc-header,
+.kontur-calendar .rbc-month-row + .rbc-month-row,
+.kontur-calendar .rbc-day-bg + .rbc-day-bg,
+.kontur-calendar .rbc-time-header-content,
+.kontur-calendar .rbc-time-content,
+.kontur-calendar .rbc-time-content > * + * > *,
+.kontur-calendar .rbc-timeslot-group,
+.kontur-calendar .rbc-time-header.rbc-overflowing,
+.kontur-calendar .rbc-time-view .rbc-allday-cell + .rbc-allday-cell,
+.kontur-calendar .rbc-day-slot .rbc-events-container,
+.kontur-calendar .rbc-time-gutter {
+  border-color: var(--border);
+}
+.kontur-calendar .rbc-day-slot .rbc-time-slot {
+  border-top-color: color-mix(in oklab, var(--border) 45%, transparent);
+}
+
+/* Заголовки дней и шкала времени */
+.kontur-calendar .rbc-header {
+  padding: 6px 4px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  text-transform: capitalize;
+}
+.kontur-calendar .rbc-header .rbc-button-link {
+  color: inherit;
+}
+.kontur-calendar .rbc-time-gutter .rbc-label,
+.kontur-calendar .rbc-label {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.kontur-calendar .rbc-time-header-gutter,
+.kontur-calendar .rbc-time-gutter {
+  background: var(--background);
+}
+
+/* Сегодня, чужой месяц, текущее время */
+.kontur-calendar .rbc-today {
+  background: color-mix(in oklab, var(--primary) 7%, transparent);
+}
+.kontur-calendar .rbc-header.rbc-today {
+  color: var(--primary);
+  font-weight: 600;
+}
+.kontur-calendar .rbc-off-range-bg {
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+}
+.kontur-calendar .rbc-off-range {
+  color: var(--muted-foreground);
+}
+.kontur-calendar .rbc-date-cell {
+  padding: 4px 6px;
+  font-variant-numeric: tabular-nums;
+}
+.kontur-calendar .rbc-date-cell.rbc-now {
+  font-weight: 700;
+  color: var(--primary);
+}
+.kontur-calendar .rbc-current-time-indicator {
+  background: var(--primary);
+  height: 2px;
+}
+
+/* События: цвет — из eventPropGetter (акцент контура), здесь только форма. */
+.kontur-calendar .rbc-event,
+.kontur-calendar .rbc-day-slot .rbc-background-event {
+  border-radius: 6px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+  font-size: 12px;
+  line-height: 1.25;
+}
+.kontur-calendar .rbc-event:focus {
+  outline: none;
+}
+.kontur-calendar .rbc-event.rbc-selected {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+.kontur-calendar .rbc-event-label {
+  font-size: 11px;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+.kontur-calendar .rbc-day-slot .rbc-event {
+  border-color: color-mix(in oklab, var(--background) 35%, transparent);
+}
+.kontur-calendar .kontur-event-short .rbc-event-label {
+  /* время уже в строке названия (EventContent) */
+  display: none;
+}
+.kontur-calendar .kontur-event-short {
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+.kontur-calendar .kontur-event-canceled {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+/*
+ * Приглашение, а не встреча: Exchange кладёт его в календарь отдельной
+ * записью рядом с настоящей встречей. Штатный клиент рисует такие серой
+ * штриховкой — делаем так же, чтобы дубль было видно и не принимать его
+ * за вторую встречу.
+ */
+.kontur-calendar .kontur-event-invitation {
+  opacity: 0.5;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgb(255 255 255 / 0.16) 0 4px,
+    transparent 4px 9px
+  );
+}
+
+/* Выделение мышью */
+.kontur-calendar .rbc-slot-selection,
+.kontur-calendar .rbc-selected-cell {
+  background: color-mix(in oklab, var(--primary) 18%, transparent);
+  color: var(--foreground);
+}
+
+/* «+ ещё N» и всплывающий список дня в месяце */
+.kontur-calendar .rbc-show-more {
+  color: var(--primary);
+  background: transparent;
+  font-weight: 500;
+}
+.kontur-calendar .rbc-overlay {
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.25);
+  z-index: 50;
+}
+.kontur-calendar .rbc-overlay-header {
+  border-color: var(--border);
+  text-transform: capitalize;
+}
+
+/* Список (agenda) */
+.kontur-calendar .rbc-agenda-view table.rbc-agenda-table {
+  border: none;
+}
+.kontur-calendar .rbc-agenda-view table.rbc-agenda-table thead > tr > th {
+  border-color: var(--border);
+  color: var(--muted-foreground);
+  font-weight: 500;
+  padding: 6px 10px;
+}
+.kontur-calendar .rbc-agenda-view table.rbc-agenda-table tbody > tr > td {
+  padding: 6px 10px;
+  border-color: var(--border);
+}
+.kontur-calendar .rbc-agenda-view table.rbc-agenda-table tbody > tr + tr,
+.kontur-calendar .rbc-agenda-view table.rbc-agenda-table tbody > tr > td + td {
+  border-color: var(--border);
+}
+.kontur-calendar .rbc-agenda-date-cell {
+  text-transform: capitalize;
+}
+.kontur-calendar .rbc-agenda-empty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+
+/* Перетаскивание (addon dragAndDrop) */
+.kontur-calendar .rbc-addons-dnd .rbc-addons-dnd-resize-ns-icon,
+.kontur-calendar .rbc-addons-dnd .rbc-addons-dnd-resize-ew-icon {
+  border-color: currentColor;
+}
+.kontur-calendar .rbc-addons-dnd-drag-preview {
+  opacity: 0.85;
+}

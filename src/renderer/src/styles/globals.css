@@ -1,0 +1,657 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Палитра как в Viaduct (c4-modelizer-1 / theme.ts + chakra-system):
+ * cool slate chrome, единственный насыщенный акцент — amber на primary.
+ * Синий только для диаграмм там; здесь его нет.
+ */
+:root {
+  --radius: 0.375rem;
+
+  --background: #f7f8fa;
+  --foreground: #0f172a;
+
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --primary: #f09a05;
+  --primary-foreground: #0a0a0c;
+
+  --secondary: #eef0f3;
+  --secondary-foreground: #0f172a;
+
+  --muted: #eef0f3;
+  --muted-foreground: #64748b;
+
+  --accent: #e8eaee;
+  --accent-foreground: #0f172a;
+
+  --destructive: #dd2b0e;
+  --destructive-foreground: #ffffff;
+
+  --success: #108548;
+  --warning: #c47c00;
+
+  --border: #d8dde6;
+  --input: #94a3b8;
+  --ring: #f09a05;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0f172a;
+  --sidebar-primary: #f09a05;
+  --sidebar-primary-foreground: #0a0a0c;
+  --sidebar-accent: #eef0f3;
+  --sidebar-accent-foreground: #0f172a;
+  --sidebar-border: #e2e6ed;
+  --sidebar-ring: #f09a05;
+}
+
+/*
+ * Виджеты на обоях. Тулбар — `bg-sidebar/55` поверх сплошного `bg-background`,
+ * поэтому при той же доле альфы на wallpaper виджеты выглядят «дырявее».
+ * Держим плотнее (~82%), чтобы визуально совпасть с шапкой. При открытых
+ * окнах снимаем только backdrop-blur (ghost-blur Chromium), альфа та же.
+ */
+.desktop-glass {
+  --muted-foreground: #334155;
+  --border: rgb(15 23 42 / 0.12);
+  --muted: rgb(15 23 42 / 0.06);
+  --accent: rgb(15 23 42 / 0.08);
+  /*
+   * Лёгкая лепка в стилистике дока: заливка слегка темнеет книзу, светлая
+   * кромка по верхнему краю, мягкая тень под карточкой. Держим сдержанно —
+   * виджеты должны читаться объёмными, но не выпуклыми «пузырями».
+   * Тень живёт здесь, а не в `shadow-*` у компонента: inset-блик и внешние
+   * слои обязаны идти одним `box-shadow`, иначе утилита Tailwind перебьёт их.
+   */
+  background-image: linear-gradient(
+    to bottom,
+    rgb(255 255 255 / 0.92) 0%,
+    rgb(246 248 251 / 0.87) 100%
+  );
+  border-color: rgb(15 23 42 / 0.1);
+  border-top-color: rgb(255 255 255 / 0.7);
+  color: #0f172a;
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.7),
+    0 1px 2px -1px rgb(15 23 42 / 0.1),
+    0 8px 18px -8px rgb(15 23 42 / 0.18),
+    0 20px 40px -24px rgb(15 23 42 / 0.2);
+}
+
+.dark .desktop-glass {
+  --muted-foreground: #a8b2c1;
+  --border: rgb(255 255 255 / 0.1);
+  --muted: rgb(255 255 255 / 0.06);
+  --accent: rgb(255 255 255 / 0.08);
+  /* Как шапка: цвет sidebar, но плотнее — подложка у виджетов ярче. */
+  background-image: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--sidebar) 84%, white 3%) 0%,
+    color-mix(in oklab, var(--sidebar) 82%, transparent) 100%
+  );
+  border-color: rgb(255 255 255 / 0.09);
+  border-top-color: rgb(255 255 255 / 0.14);
+  color: var(--card-foreground);
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.07),
+    0 1px 2px -1px rgb(0 0 0 / 0.4),
+    0 10px 20px -10px rgb(0 0 0 / 0.4),
+    0 24px 48px -28px rgb(0 0 0 / 0.45);
+}
+
+/*
+ * Приподнятая плитка внутри виджета — иконка-бейдж, кружок «готово» и т.п.
+ * Та же лепка, что у плиток дока, но вполсилы: это мелочь внутри карточки.
+ */
+.desk-tile {
+  background-image: linear-gradient(to bottom, rgb(255 255 255 / 0.6), rgb(255 255 255 / 0.3));
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.6),
+    0 0 0 1px rgb(15 23 42 / 0.06),
+    0 1px 1.5px 0 rgb(15 23 42 / 0.08);
+}
+
+.dark .desk-tile {
+  background-image: linear-gradient(to bottom, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0.015));
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.08),
+    0 0 0 1px rgb(0 0 0 / 0.3),
+    0 1px 1.5px 0 rgb(0 0 0 / 0.3);
+}
+
+/*
+ * Пилюля-фильтр: в покое чуть приподнята, выбранная — вдавлена внутрь
+ * карточки. Разница в тенях, а не только в цвете: так видно, что она нажата.
+ */
+.desk-chip {
+  background-image: linear-gradient(to bottom, rgb(255 255 255 / 0.5), rgb(255 255 255 / 0.22));
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.55),
+    0 0 0 1px rgb(15 23 42 / 0.05),
+    0 1px 1px 0 rgb(15 23 42 / 0.07);
+}
+
+.dark .desk-chip {
+  background-image: linear-gradient(to bottom, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.015));
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.06),
+    0 0 0 1px rgb(0 0 0 / 0.28),
+    0 1px 1px 0 rgb(0 0 0 / 0.28);
+}
+
+.desk-chip-on {
+  background-image: linear-gradient(to bottom, rgb(15 23 42 / 0.09), rgb(15 23 42 / 0.045));
+  box-shadow:
+    inset 0 1px 1.5px 0 rgb(15 23 42 / 0.14),
+    inset 0 -1px 0 0 rgb(255 255 255 / 0.4),
+    0 0 0 1px rgb(15 23 42 / 0.07);
+}
+
+.dark .desk-chip-on {
+  background-image: linear-gradient(to bottom, rgb(0 0 0 / 0.28), rgb(0 0 0 / 0.14));
+  box-shadow:
+    inset 0 1px 2px 0 rgb(0 0 0 / 0.45),
+    inset 0 -1px 0 0 rgb(255 255 255 / 0.05),
+    0 0 0 1px rgb(0 0 0 / 0.3);
+}
+
+.dark {
+  /* darkChrome: page/canvas graphite, nav #1d2027, amber #f09a05 */
+  --background: #13161c;
+  --foreground: #e8edf5;
+
+  --card: #1a1d24;
+  --card-foreground: #e8edf5;
+  --popover: #1a1d24;
+  --popover-foreground: #e8edf5;
+
+  --primary: #f09a05;
+  --primary-foreground: #0a0a0c;
+
+  --secondary: #1d2027;
+  --secondary-foreground: #e8edf5;
+
+  --muted: #181b22;
+  --muted-foreground: #8b94a3;
+
+  --accent: #252a33;
+  --accent-foreground: #e8edf5;
+
+  --destructive: #ec5941;
+  --destructive-foreground: #0a0a0c;
+
+  --success: #2da160;
+  --warning: #f5b23c;
+
+  --border: #3a4050;
+  --input: #6b7488;
+  --ring: #f5b23c;
+
+  --sidebar: #1d2027;
+  --sidebar-foreground: #e8edf5;
+  --sidebar-primary: #f09a05;
+  --sidebar-primary-foreground: #0a0a0c;
+  --sidebar-accent: #252a33;
+  --sidebar-accent-foreground: #e8edf5;
+  --sidebar-border: #2a303c;
+  --sidebar-ring: #f5b23c;
+}
+
+
+@theme inline {
+  --font-sans: 'Golos Text', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: 'IBM Plex Serif', Georgia, serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Анимация северного сияния (Aceternity AuroraBackground). */
+  --animate-aurora: aurora 60s linear infinite;
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans text-[13px] antialiased;
+    margin: 0;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* Поля ввода и текст заметок выделять можно — всё остальное ведёт себя как нативное окно. */
+  input,
+  textarea,
+  [contenteditable],
+  .selectable {
+    user-select: text;
+  }
+
+  /*
+   * Chromium больше не ставит pointer на <button> по умолчанию.
+   * Все кликабельные контролы — явно pointer (кроме disabled).
+   */
+  button:not(:disabled):not([disabled]),
+  [role='button']:not([aria-disabled='true']),
+  a[href],
+  summary,
+  label[for],
+  select:not(:disabled),
+  input[type='checkbox']:not(:disabled),
+  input[type='radio']:not(:disabled),
+  input[type='file']:not(:disabled),
+  input[type='color']:not(:disabled),
+  input[type='submit']:not(:disabled),
+  input[type='button']:not(:disabled),
+  input[type='reset']:not(:disabled),
+  [data-slot='button']:not(:disabled):not([disabled]),
+  [data-slot='switch']:not(:disabled):not([disabled]),
+  [data-slot='tabs-trigger']:not(:disabled):not([disabled]),
+  [data-slot='select-trigger']:not(:disabled):not([disabled]),
+  [data-slot='select-item']:not([data-disabled]),
+  [data-slot='dialog-close'] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  button[disabled],
+  [aria-disabled='true'],
+  [data-disabled] {
+    cursor: not-allowed;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-input;
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /*
+   * Radix ScrollArea вешает на внутренний div display:table + min-width:100%.
+   * Из-за этого truncate/grid в списках (почта) раздувают ширину, и дата справа
+   * уезжает за overflow:hidden вьюпорта.
+   */
+  [data-slot='scroll-area-viewport'] > div {
+    display: block !important;
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+}
+
+@layer utilities {
+  /* Перетаскивание окна за верхнюю полосу (titleBarStyle: hiddenInset). */
+  .drag {
+    -webkit-app-region: drag;
+  }
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
+
+/* ── Редактор заметок ────────────────────────────────────────── */
+.cm-editor {
+  height: 100%;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+.cm-scroller {
+  font-family: inherit;
+  padding: 20px 28px 48px;
+}
+
+.cm-content {
+  caret-color: var(--primary);
+  user-select: text;
+}
+
+.cm-gutters {
+  display: none;
+}
+
+.cm-activeLine {
+  background: transparent;
+}
+
+.cm-selectionBackground,
+.cm-editor ::selection {
+  background: color-mix(in srgb, var(--primary) 26%, transparent) !important;
+}
+
+.cm-editor .tok-heading {
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+.cm-editor .tok-link {
+  color: var(--primary);
+}
+.cm-editor .tok-emphasis {
+  font-style: italic;
+}
+.cm-editor .tok-strong {
+  font-weight: 600;
+}
+.cm-editor .tok-monospace {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--muted);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.cm-editor .tok-meta {
+  color: var(--muted-foreground);
+}
+
+/* Просмотр заметки (отрендеренный markdown) */
+.notes-prose {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--foreground);
+}
+.notes-prose > :first-child {
+  margin-top: 0;
+}
+.notes-prose h1,
+.notes-prose h2,
+.notes-prose h3,
+.notes-prose h4 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.4em 0 0.5em;
+}
+.notes-prose h1 {
+  font-size: 1.75em;
+}
+.notes-prose h2 {
+  font-size: 1.35em;
+}
+.notes-prose h3 {
+  font-size: 1.15em;
+}
+.notes-prose p,
+.notes-prose ul,
+.notes-prose ol,
+.notes-prose blockquote,
+.notes-prose pre,
+.notes-prose table {
+  margin: 0.75em 0;
+}
+.notes-prose ul,
+.notes-prose ol {
+  padding-left: 1.4em;
+}
+.notes-prose li + li {
+  margin-top: 0.25em;
+}
+.notes-prose blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 0.9em;
+  color: var(--muted-foreground);
+}
+.notes-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--muted);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.notes-prose pre {
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--muted);
+  padding: 12px 14px;
+}
+.notes-prose pre code {
+  background: transparent;
+  padding: 0;
+}
+.notes-prose a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.notes-prose strong {
+  font-weight: 600;
+}
+.notes-prose em {
+  font-style: italic;
+}
+.notes-prose hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1.5em 0;
+}
+.notes-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+  font-family: var(--font-sans);
+}
+.notes-prose th,
+.notes-prose td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.notes-prose th {
+  background: var(--muted);
+  font-weight: 600;
+}
+.notes-prose .notes-table-wrap {
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+.notes-prose .notes-table-wrap table {
+  margin: 0;
+}
+.notes-wikilink {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+/*
+ * Aceternity AuroraBackground.
+ *
+ * Оригинал берёт цвета из плагина, который вываливает в CSS-переменные всю
+ * палитру Tailwind. Ради одного фона это лишнее — объявляем ровно те шесть
+ * значений, которые компонент реально использует.
+ */
+.kontur-aurora {
+  --white: #fff;
+  --black: #000;
+  --transparent: transparent;
+  --blue-300: #93c5fd;
+  --blue-400: #60a5fa;
+  --blue-500: #3b82f6;
+  --indigo-300: #a5b4fc;
+  --violet-200: #ddd6fe;
+}
+
+@keyframes aurora {
+  from {
+    background-position:
+      50% 50%,
+      50% 50%;
+  }
+  to {
+    background-position:
+      350% 50%,
+      350% 50%;
+  }
+}
+
+/*
+ * Окно спрятали — крутить фон незачем: это постоянная работа GPU ради
+ * картинки, которой никто не видит. Пауза, а не remount: при возврате
+ * сияние продолжается с того же места, а не дёргается с начала.
+ */
+.kontur-aurora[data-paused='true'] *::after {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kontur-aurora *::after {
+    animation: none;
+  }
+}
+
+/* Aceternity BackgroundGradientAnimation */
+@keyframes bg-move-vertical {
+  0% {
+    transform: translateY(-50%);
+  }
+  50% {
+    transform: translateY(50%);
+  }
+  100% {
+    transform: translateY(-50%);
+  }
+}
+@keyframes bg-move-in-circle {
+  0% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(180deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+@keyframes bg-move-horizontal {
+  0% {
+    transform: translateX(-50%) translateY(-10%);
+  }
+  50% {
+    transform: translateX(50%) translateY(10%);
+  }
+  100% {
+    transform: translateX(-50%) translateY(-10%);
+  }
+}
+
+.animate-bg-first {
+  animation: bg-move-vertical 30s ease infinite;
+}
+.animate-bg-second {
+  animation: bg-move-in-circle 20s reverse infinite;
+}
+.animate-bg-third {
+  animation: bg-move-in-circle 40s linear infinite;
+}
+.animate-bg-fourth {
+  animation: bg-move-horizontal 40s ease infinite;
+}
+.animate-bg-fifth {
+  animation: bg-move-in-circle 20s ease infinite;
+}
+
+/*
+ * Письма из Outlook/Exchange часто тащат color:#000 и белый фон в style/font.
+ * prose-invert их не перебивает — форсим читаемый текст на тёмной теме.
+ */
+.dark .mail-html {
+  color: var(--foreground);
+}
+.dark .mail-html :where(*) {
+  color: inherit !important;
+  background-color: transparent !important;
+  background-image: none !important;
+}
+.dark .mail-html :where(a) {
+  color: var(--primary) !important;
+}
+.dark .mail-html :where(hr),
+.dark .mail-html :where(blockquote) {
+  border-color: color-mix(in oklab, var(--foreground) 18%, transparent) !important;
+}
+.dark .mail-html :where(table),
+.dark .mail-html :where(td),
+.dark .mail-html :where(th) {
+  border-color: color-mix(in oklab, var(--foreground) 18%, transparent) !important;
+}
+
+/* Aceternity feature card: луч, пробегающий сквозь «витрину» карточки. */
+@keyframes card-beam-move {
+  0% {
+    transform: translateX(-130px);
+  }
+  100% {
+    transform: translateX(130px);
+  }
+}
+.animate-card-beam {
+  animation: card-beam-move 5s linear infinite alternate;
+}

@@ -1,0 +1,18 @@
+node_modules/
+out/
+dist/
+.DS_Store
+*.log
+.vite/
+*.tsbuildinfo
+.env
+.env.*
+*.pem
+*.p12
+*.pfx
+# snx-rs binaries (AGPL) — fetch before dist: npm run fetch:snx
+vendor/snx-rs/snx-rs
+vendor/snx-rs/snxctl
+# локальные конфиги / черновики
+*.local.json
+.kontur/
