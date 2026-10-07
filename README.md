@@ -4,7 +4,11 @@
 чат, почта и календарь в одном окне — плюс сквозной поиск, заметки, терминал и
 автоматизации.
 
-Репозиторий: [anger1989/kontur-app](https://github.com/anger1989/kontur-app).
+Репозиторий (HTTPS): https://github.com/anger1989/kontur-app.git
+
+```bash
+git clone https://github.com/anger1989/kontur-app.git
+```
 
 ## Зачем нативное приложение
 

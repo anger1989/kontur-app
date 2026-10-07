@@ -4,7 +4,11 @@
   "description": "Единое рабочее место для двух изолированных контуров",
   "main": "./out/main/index.js",
   "author": "",
-  "homepage": "",
+  "homepage": "https://github.com/anger1989/kontur-app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anger1989/kontur-app.git"
+  },
   "private": true,
   "type": "module",
   "scripts": {
