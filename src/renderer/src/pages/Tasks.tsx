@@ -106,7 +106,7 @@ function columnMatchesItem(col: BoardColumn, item: Item): boolean {
 
 /**
  * Канбан своих задач из Jira.
- * Колонки — со статусов Agile-доски проекта (options.projectKey), иначе statusCategory.
+ * Колонки — оригинальные статусы workflow (порядок с Agile-доски), не имена колонок доски.
  */
 export function Tasks(): JSX.Element {
   const { config, openItem } = useStore()
@@ -244,7 +244,11 @@ export function Tasks(): JSX.Element {
     try {
       const target = col.id.startsWith('cat:')
         ? { category: col.category }
-        : { statusName: col.statusName || col.title }
+        : {
+            statusName: col.statusName || col.title,
+            // Колонка доски = набор статусов; матчим любой доступный переход в них.
+            statusIds: col.statusIds
+          }
       const next = await window.kontur.tasks.transition(cardId, target)
       setItems((prev) => prev.map((it) => (it.id === next.id ? next : it)))
     } catch (e) {
@@ -260,8 +264,8 @@ export function Tasks(): JSX.Element {
           <h1 className="text-[26px] leading-tight font-semibold tracking-tight">Задачи</h1>
           <p className="mt-1 text-muted-foreground">
             {projectKey
-              ? `Мои задачи · проект ${projectKey} · колонки с доски Jira`
-              : 'Мои задачи из Jira · укажи проект в настройках сервиса — подтянем колонки доски'}
+              ? `Мои задачи · проект ${projectKey} · статусы Jira`
+              : 'Мои задачи из Jira · укажи проект в настройках сервиса — подтянем статусы'}
           </p>
         </div>
         <Button size="sm" variant="outline" disabled={syncing} onClick={() => void sync()}>

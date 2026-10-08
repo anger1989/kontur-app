@@ -149,7 +149,11 @@ export const mattermostConnector: Connector = {
    * Живой поток событий. Mattermost шлёт их по WebSocket, так что упоминания
    * приходят сразу, а не через минуту опроса.
    */
-  async startRealtime(ctx: SyncContext, onItems: (items: Item[]) => void): Promise<() => void> {
+  async startRealtime(
+    ctx: SyncContext,
+    onItems: (items: Item[]) => void,
+    onResync?: () => void
+  ): Promise<() => void> {
     const api = clientFor(ctx)
     const me = await api.me()
     const teams = await api.myTeams()
@@ -182,6 +186,18 @@ export const mattermostConnector: Connector = {
             data?: Record<string, unknown>
             broadcast?: { team_id?: string }
           }
+
+          // Прочитал канал в embed — сервер шлёт channel_viewed; без resync
+          // settleUnread ждёт hide вкладки или poll 90s, и виджет внимания врёт.
+          if (
+            frame.event === 'channel_viewed' ||
+            frame.event === 'multiple_channels_viewed' ||
+            frame.event === 'channel_marked'
+          ) {
+            onResync?.()
+            return
+          }
+
           if (frame.event !== 'posted' || !frame.data?.post) return
 
           const post = JSON.parse(String(frame.data.post)) as MmPost

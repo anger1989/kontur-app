@@ -35,6 +35,8 @@ class Scheduler extends EventEmitter {
   private realtime = new Map<string, () => void>()
   private running = false
   private pendingServiceSync = new Set<string>()
+  /** Debounce resync по channel_viewed — WS сыплет пачками при чтении. */
+  private resyncTimers = new Map<string, ReturnType<typeof setTimeout>>()
   // Первый проход только наполняет базу — уведомлять о «новом» на нём нельзя,
   // иначе при старте посыпятся десятки уведомлений о давно существующем.
   private seeded = false
@@ -102,15 +104,31 @@ class Scheduler extends EventEmitter {
     })
   }
 
+  private scheduleResync(serviceId: string): void {
+    const prev = this.resyncTimers.get(serviceId)
+    if (prev) clearTimeout(prev)
+    this.resyncTimers.set(
+      serviceId,
+      setTimeout(() => {
+        this.resyncTimers.delete(serviceId)
+        void this.syncService(serviceId)
+      }, 400)
+    )
+  }
+
   private attachRealtime(service: ServiceConfig, ctx: SyncContext): void {
     const connector = connectorFor(service.kind)
     if (!connector?.startRealtime || this.realtime.has(service.id)) return
     void connector
-      .startRealtime(ctx, (items) => {
-        const fresh = upsertItems(items)
-        if (fresh.length && this.seeded) this.emit('new-items', fresh)
-        this.emit('items')
-      })
+      .startRealtime(
+        ctx,
+        (items) => {
+          const fresh = upsertItems(items)
+          if (fresh.length && this.seeded) this.emit('new-items', fresh)
+          this.emit('items')
+        },
+        () => this.scheduleResync(service.id)
+      )
       .then((stop) => {
         this.realtime.set(service.id, stop)
       })
@@ -155,6 +173,9 @@ class Scheduler extends EventEmitter {
   }
 
   private dropRealtime(serviceId: string): void {
+    const t = this.resyncTimers.get(serviceId)
+    if (t) clearTimeout(t)
+    this.resyncTimers.delete(serviceId)
     const stop = this.realtime.get(serviceId)
     if (!stop) return
     stop()

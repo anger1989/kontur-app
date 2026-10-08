@@ -55,7 +55,7 @@ function rebuildBody(
  */
 export async function transitionTask(
   itemId: string,
-  target: { category?: string; statusName?: string }
+  target: { category?: string; statusName?: string; statusIds?: string[] }
 ): Promise<Item> {
   const existing = getItem(itemId)
   if (!existing || existing.kind !== 'task') throw new Error('Задача не найдена локально')

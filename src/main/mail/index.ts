@@ -89,6 +89,7 @@ export async function getMail(itemId: string): Promise<MailDetail> {
   /** Сразу пишем в БД — иначе при уходе со страницы список снова подтянет unread. */
   const persistRead = (body?: string): void => {
     if (!existing) return
+    const wasAttention = existing.unread || existing.mentioned
     upsertItems([
       {
         ...existing,
@@ -97,6 +98,9 @@ export async function getMail(itemId: string): Promise<MailDetail> {
         state: 'прочитано'
       }
     ])
+    // Без emit виджет «Требует внимания» висит, пока не придёт чужой sync:
+    // письмо уже прочитано в окне Почты, а не через клик по виджету.
+    if (wasAttention) emitItemsChanged()
   }
 
   let detail: Omit<MailDetail, 'id' | 'serviceId'>
@@ -271,6 +275,7 @@ export function markMailRead(itemId: string): void {
   const existing = getItem(itemId)
   if (!existing || !existing.unread) return
   upsertItems([{ ...existing, unread: false, state: 'прочитано' }])
+  emitItemsChanged()
 }
 
 function buildMime(p: {

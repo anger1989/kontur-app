@@ -263,8 +263,10 @@ const api = {
       invoke<CalendarScheduleResult>(CH.calendarSchedule, query)
   },
   tasks: {
-    transition: (id: string, target: { category?: string; statusName?: string }) =>
-      invoke<Item>(CH.tasksTransition, id, target),
+    transition: (
+      id: string,
+      target: { category?: string; statusName?: string; statusIds?: string[] }
+    ) => invoke<Item>(CH.tasksTransition, id, target),
     board: (serviceId?: string) =>
       invoke<{
         serviceId: string | null

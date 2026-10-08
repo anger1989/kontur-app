@@ -49,8 +49,16 @@ export interface Connector {
   kind: ServiceKind
   /** Инкрементальное чтение. Вызывается планировщиком, пока контур доступен. */
   sync(ctx: SyncContext): Promise<SyncResult>
-  /** Подписка на события в реальном времени. Возвращает функцию отписки. */
-  startRealtime?(ctx: SyncContext, onItems: (items: Item[]) => void): Promise<() => void>
+  /**
+   * Подписка на события в реальном времени. Возвращает функцию отписки.
+   * `onResync` — сервер сказал «прочитано» (channel_viewed и т.п.): планировщик
+   * пересинхронизирует unread, чтобы виджет внимания обновился без выхода из вкладки.
+   */
+  startRealtime?(
+    ctx: SyncContext,
+    onItems: (items: Item[]) => void,
+    onResync?: () => void
+  ): Promise<() => void>
   /** Выполнить отложенное действие из outbox. Бросает — действие останется в очереди. */
   perform?(ctx: SyncContext, action: string, payload: unknown): Promise<void>
 }

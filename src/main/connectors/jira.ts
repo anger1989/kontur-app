@@ -37,7 +37,7 @@ interface JiraField {
 interface JiraTransition {
   id: string
   name: string
-  to: { name: string; statusCategory?: { key?: string } }
+  to: { id?: string; name: string; statusCategory?: { key?: string } }
 }
 interface JiraTransitions {
   transitions: JiraTransition[]
@@ -219,8 +219,9 @@ function categoryOf(key?: string): 'new' | 'indeterminate' | 'done' {
 }
 
 /**
- * Колонки канбана: с Agile-доски проекта (если projectKey задан),
- * иначе статусы проекта, иначе три statusCategory.
+ * Колонки канбана — оригинальные статусы Jira (In Progress, Backlog…),
+ * не агрегированные колонки Agile-доски (Development = пачка статусов).
+ * Порядок берём с доски, если она есть; иначе — статусы проекта.
  */
 export async function fetchJiraBoardColumns(ctx: SyncContext): Promise<JiraBoardColumn[]> {
   const root = base(ctx.service.baseUrl)
@@ -235,8 +236,16 @@ export async function fetchJiraBoardColumns(ctx: SyncContext): Promise<JiraBoard
     logInfo('mail', `Jira statuses: ${String(e)}`)
   }
 
-  // 1) Agile board configuration
+  const toColumn = (st: JiraStatusDto): JiraBoardColumn => ({
+    id: `status:${st.id}`,
+    title: st.name,
+    category: categoryOf(st.statusCategory?.key),
+    statusIds: [st.id],
+    statusName: st.name
+  })
+
   if (projectKey) {
+    // 1) Статусы в порядке колонок Agile-доски — но по одному столбцу на статус.
     try {
       let boardId = boardIdOpt
       if (!boardId) {
@@ -258,23 +267,29 @@ export async function fetchJiraBoardColumns(ctx: SyncContext): Promise<JiraBoard
         }>(ctx, `${root}/rest/agile/1.0/board/${boardId}/configuration`)
         const cols = cfg.columnConfig?.columns ?? []
         const mapped: JiraBoardColumn[] = []
+        const seen = new Set<string>()
         for (const col of cols) {
-          const ids = (col.statuses ?? []).map((s) => s.id).filter(Boolean)
-          if (!ids.length) continue
-          const first = statusById.get(ids[0]!)
-          const cat = categoryOf(first?.statusCategory?.key)
-          // Для transition берём первый статус колонки; имя — из Jira или заголовок колонки.
-          const statusName = first?.name ?? col.name
-          mapped.push({
-            id: `col:${boardId}:${col.name}`,
-            title: col.name,
-            category: cat,
-            statusIds: ids,
-            statusName
-          })
+          for (const raw of col.statuses ?? []) {
+            const id = String(raw.id)
+            if (!id || seen.has(id)) continue
+            seen.add(id)
+            const st = statusById.get(id)
+            if (st) {
+              mapped.push(toColumn(st))
+            } else {
+              // Редко: id с доски нет в /status — всё равно колонка, имя с доски хуже, чем id.
+              mapped.push({
+                id: `status:${id}`,
+                title: col.name,
+                category: 'new',
+                statusIds: [id],
+                statusName: col.name
+              })
+            }
+          }
         }
         if (mapped.length) {
-          logInfo('mail', `Jira board ${boardId}: ${mapped.length} колонок`)
+          logInfo('mail', `Jira board ${boardId}: ${mapped.length} статусов (не колонок доски)`)
           return mapped
         }
       }
@@ -284,9 +299,10 @@ export async function fetchJiraBoardColumns(ctx: SyncContext): Promise<JiraBoard
 
     // 2) Статусы проекта (по типам задач — уникальные)
     try {
-      const types = await getJson<
-        { name: string; statuses: JiraStatusDto[] }[]
-      >(ctx, `${root}/rest/api/2/project/${encodeURIComponent(projectKey)}/statuses`)
+      const types = await getJson<{ name: string; statuses: JiraStatusDto[] }[]>(
+        ctx,
+        `${root}/rest/api/2/project/${encodeURIComponent(projectKey)}/statuses`
+      )
       const seen = new Set<string>()
       const mapped: JiraBoardColumn[] = []
       const order: Array<'new' | 'indeterminate' | 'done'> = ['new', 'indeterminate', 'done']
@@ -295,14 +311,7 @@ export async function fetchJiraBoardColumns(ctx: SyncContext): Promise<JiraBoard
         for (const st of t.statuses ?? []) {
           if (seen.has(st.id)) continue
           seen.add(st.id)
-          const cat = categoryOf(st.statusCategory?.key)
-          buckets[cat]!.push({
-            id: `status:${st.id}`,
-            title: st.name,
-            category: cat,
-            statusIds: [st.id],
-            statusName: st.name
-          })
+          buckets[categoryOf(st.statusCategory?.key)]!.push(toColumn(st))
         }
       }
       for (const cat of order) mapped.push(...(buckets[cat] ?? []))
@@ -320,17 +329,38 @@ export async function fetchJiraBoardColumns(ctx: SyncContext): Promise<JiraBoard
   ]
 }
 
-/** Перевести задачу: по имени статуса или по statusCategory.key (new/indeterminate/done). */
+/**
+ * Перевести задачу. Колонка доски часто группирует несколько статусов — ищем
+ * любой доступный переход в один из `statusIds`, потом по имени, потом по category.
+ */
 export async function jiraTransition(
   ctx: SyncContext,
   issueKey: string,
-  target: { statusName?: string; category?: string }
+  target: { statusName?: string; category?: string; statusIds?: string[] }
 ): Promise<{ statusName: string; category: string }> {
   const root = base(ctx.service.baseUrl)
   const data = await getJson<JiraTransitions>(ctx, `${root}/rest/api/2/issue/${issueKey}/transitions`)
+  const wantIds = new Set((target.statusIds ?? []).map(String))
+  const wantName = target.statusName?.trim().toLowerCase()
+
+  const byId = wantIds.size
+    ? data.transitions.filter((t) => t.to.id != null && wantIds.has(String(t.to.id)))
+    : []
+  // Если в колонку ведёт несколько переходов — предпочитаем тот, чей to.name
+  // совпал с именем колонки/статуса (Backlog, а не случайный Open в той же колонке).
   const hit =
-    (target.statusName
-      ? data.transitions.find((t) => t.to.name.toLowerCase() === target.statusName!.toLowerCase())
+    (wantName
+      ? byId.find(
+          (t) =>
+            t.to.name.toLowerCase() === wantName || t.name.toLowerCase() === wantName
+        )
+      : undefined) ??
+    byId[0] ??
+    (wantName
+      ? data.transitions.find(
+          (t) =>
+            t.to.name.toLowerCase() === wantName || t.name.toLowerCase() === wantName
+        )
       : undefined) ??
     (target.category
       ? data.transitions.find((t) => t.to.statusCategory?.key === target.category)

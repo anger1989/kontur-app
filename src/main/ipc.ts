@@ -352,7 +352,11 @@ export function registerIpc(getWin: () => BrowserWindow | null, views: () => Ser
   ipcMain.handle(CH.calendarSchedule, (_e, query: CalendarScheduleQuery) => getSchedule(query))
   ipcMain.handle(
     CH.tasksTransition,
-    async (_e, id: string, target: { category?: string; statusName?: string }) => {
+    async (
+      _e,
+      id: string,
+      target: { category?: string; statusName?: string; statusIds?: string[] }
+    ) => {
       const item = await transitionTask(id, target)
       emitItemsChanged()
       return item
