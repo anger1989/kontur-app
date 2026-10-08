@@ -346,7 +346,8 @@ export function Mail({
     try {
       setRules(await window.kontur.mail.listRules({ serviceId: primaryMail.id }))
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
+      const raw = e instanceof Error ? e.message : String(e)
+      toast.error(raw.replace(/^Error invoking remote method '[^']+':\s*/i, ''))
     } finally {
       setRulesLoading(false)
     }
@@ -828,16 +829,32 @@ function RulesDialog({
   const [saving, setSaving] = useState(false)
   const [ruleFolders, setRuleFolders] = useState<MailMailbox[]>([])
 
+  // Папки — после списка правил, не параллельно: два EWS сразу через VPN
+  // часто дают SocketError «other side closed».
   useEffect(() => {
     if (!open || !supported || !serviceId) {
       setRuleFolders([])
       return
     }
+    if (loading) return
+    let cancelled = false
     void window.kontur.mail
       .listFoldersForRules({ serviceId })
-      .then(setRuleFolders)
-      .catch(() => setRuleFolders([]))
-  }, [open, supported, serviceId])
+      .then((folders) => {
+        if (!cancelled) setRuleFolders(folders)
+      })
+      .catch(() => {
+        if (!cancelled) setRuleFolders([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, supported, serviceId, loading])
+
+  const ipcErr = (e: unknown): string => {
+    const raw = e instanceof Error ? e.message : String(e)
+    return raw.replace(/^Error invoking remote method '[^']+':\s*/i, '')
+  }
 
   const create = async (): Promise<void> => {
     if (!serviceId || !name.trim()) return
@@ -867,10 +884,15 @@ function RulesDialog({
       setFromContains('')
       setSubjectContains('')
       setMoveTo('')
-      await onReload()
+      try {
+        await onReload()
+      } catch (e) {
+        toast.message('Правило создано, но список не обновился', { description: ipcErr(e) })
+        return
+      }
       toast.success('Правило создано')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
+      toast.error(ipcErr(e))
     } finally {
       setSaving(false)
     }

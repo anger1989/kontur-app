@@ -1,13 +1,13 @@
 import { request } from 'undici'
 import type { Item, MailMailbox, MailRule, MailRuleUpsert } from '@shared/types'
-import { dispatcherFor } from '../net/transport'
+import { dispatcherFor, resetDispatcher } from '../net/transport'
 import { base, stripHtml } from './http'
 import { itemId, type Connector, type PruneWindow, type SyncContext, type SyncResult } from './types'
 import { syncJmap } from './jmap'
 import { syncImap } from './imap'
 import { caldavWindow, syncCaldav } from './caldav'
 import { syncEas } from './eas'
-import { logInfo, logError } from '../log'
+import { logInfo, logError, logWarn } from '../log'
 
 /**
  * Выполнить источник, но не ронять остальные: ошибку пишем в лог с деталями.
@@ -46,7 +46,22 @@ function ewsUrl(ctx: SyncContext): string {
   return `${base(root)}/EWS/Exchange.asmx`
 }
 
-async function soap(ctx: SyncContext, body: string): Promise<string> {
+/** Имя операции из тела → SOAPAction (без него часть IIS/Exchange рвёт сокет). */
+function soapAction(body: string): string {
+  const op = /<m:([A-Za-z0-9]+)/.exec(body)?.[1] ?? 'Exchange'
+  return `http://schemas.microsoft.com/exchange/services/2006/messages/${op}`
+}
+
+function isTransientSocketError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  const code =
+    err && typeof err === 'object' && 'code' in err ? String((err as { code?: unknown }).code) : ''
+  return /other side closed|ECONNRESET|EPIPE|socket hang up|UND_ERR_SOCKET|ECONNREFUSED/i.test(
+    `${msg} ${code}`
+  )
+}
+
+async function soapOnce(ctx: SyncContext, body: string): Promise<string> {
   const envelope = `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
   xmlns:m="${EWS_NS}" xmlns:t="${T_NS}">
@@ -64,10 +79,15 @@ async function soap(ctx: SyncContext, body: string): Promise<string> {
   const res = await request(ewsUrl(ctx), {
     method: 'POST',
     dispatcher: dispatcherFor(ctx.env),
-    headers: { 'content-type': 'text/xml; charset=utf-8', authorization: basicAuth },
+    headers: {
+      'content-type': 'text/xml; charset=utf-8',
+      authorization: basicAuth,
+      // Кавычки — как в MSDN / Outlook; без SOAPAction прокси иногда рвёт TCP.
+      SOAPAction: `"${soapAction(body)}"`
+    },
     body: envelope,
-    headersTimeout: 20_000,
-    bodyTimeout: 20_000
+    headersTimeout: 30_000,
+    bodyTimeout: 60_000
   })
   const text = await res.body.text()
   if (res.statusCode >= 400) {
@@ -77,7 +97,35 @@ async function soap(ctx: SyncContext, body: string): Promise<string> {
         : `EWS ответил ${res.statusCode}: ${text.slice(0, 160)}`
     )
   }
+  // SOAP Fault при 200 — иначе «успех» с пустым списком правил.
+  if (/<faultcode\b|<s:Fault\b|<soap:Fault\b/i.test(text)) {
+    const fault =
+      /<(?:faultstring|s:faultstring|soap:faultstring)[^>]*>([\s\S]*?)<\//i.exec(text)?.[1]?.trim() ??
+      text.slice(0, 200)
+    throw new Error(`EWS: ${fault.replace(/<[^>]+>/g, '').slice(0, 220)}`)
+  }
   return text
+}
+
+async function soap(ctx: SyncContext, body: string): Promise<string> {
+  try {
+    return await soapOnce(ctx, body)
+  } catch (err) {
+    if (!isTransientSocketError(err)) throw err
+    // После VPN/idle keep-alive сокет мёртв — undici отдаёт «other side closed».
+    logWarn('mail', `EWS socket: ${err instanceof Error ? err.message : String(err)} — retry`)
+    resetDispatcher(ctx.env.id)
+    try {
+      return await soapOnce(ctx, body)
+    } catch (retryErr) {
+      if (isTransientSocketError(retryErr)) {
+        throw new Error(
+          'EWS оборвал соединение. Проверьте VPN/ewsUrl и что контур поднят, затем повторите.'
+        )
+      }
+      throw retryErr
+    }
+  }
 }
 
 /* Регэкспы вместо полноценного XML-парсера: ответы EWS предсказуемы, а лишней
@@ -467,13 +515,20 @@ export async function upsertEwsRule(ctx: SyncContext, payload: MailRuleUpsert): 
       <m:Operations>${op}</m:Operations>
     </m:UpdateInboxRules>`
   )
-  const rules = await listEwsRules(ctx)
-  if (payload.id) {
-    const hit = rules.find((r) => r.id === payload.id)
-    if (hit) return hit
+  // Список после записи — best-effort: создание уже прошло, обрыв сокета
+  // на GetInboxRules не должен откатывать успех в UI.
+  try {
+    const rules = await listEwsRules(ctx)
+    if (payload.id) {
+      const hit = rules.find((r) => r.id === payload.id)
+      if (hit) return hit
+    }
+    const byName = rules.filter((r) => r.name === payload.name)
+    if (byName.length) return byName[byName.length - 1]!
+  } catch (err) {
+    logWarn('mail', `GetInboxRules после upsert: ${err instanceof Error ? err.message : String(err)}`)
   }
-  const byName = rules.filter((r) => r.name === payload.name)
-  return byName[byName.length - 1] ?? {
+  return {
     id: payload.id ?? 'unknown',
     name: payload.name,
     enabled: payload.enabled !== false,

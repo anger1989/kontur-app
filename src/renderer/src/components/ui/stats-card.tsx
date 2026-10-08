@@ -132,8 +132,10 @@ const dotVariants: Variants = {
   visible: { scale: 1, opacity: 1, transition: { type: 'spring', damping: 14, stiffness: 240 } }
 }
 
-/** Геометрия линейного графика. Единицы — координаты viewBox, не пиксели. */
-const LINE = { w: 280, h: 58, padX: 10, padTop: 13, plotH: 29, labelY: 55 } as const
+/** Геометрия линейного графика. Единицы — координаты viewBox, не пиксели.
+ *  Подписи дней — HTML под SVG (как у bars): внутри motion.g со scale:0
+ *  SVG-text то пропадал, то оставался с opacity 0 после анимации. */
+const LINE = { w: 280, h: 44, padX: 10, padTop: 12, plotH: 28 } as const
 
 /**
  * Ломаная по значениям-процентам.
@@ -154,7 +156,7 @@ function LineChart({
   const currentIndex = data.some((d) => d.current)
     ? data.findIndex((d) => d.current)
     : data.length - 1
-  const { w, h, padX, padTop, plotH, labelY } = LINE
+  const { w, h, padX, padTop, plotH } = LINE
   const baseline = padTop + plotH
   const n = data.length
   const pts = data.map((d, i) => {
@@ -164,66 +166,71 @@ function LineChart({
   })
   const polyline = pts.map(([x, y]) => `${x},${y}`).join(' ')
   const area = `${pts[0]?.[0] ?? padX},${baseline} ${polyline} ${pts[n - 1]?.[0] ?? w - padX},${baseline}`
+  const sidePad = `${(padX / w) * 100}%`
 
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-[58px] w-full" role="img">
-      <line
-        x1={padX}
-        y1={baseline}
-        x2={w - padX}
-        y2={baseline}
-        className="stroke-border"
-        strokeWidth={1}
-      />
-      <motion.polygon points={area} variants={areaVariants} className="fill-primary/15" />
-      <motion.polyline
-        points={polyline}
-        variants={strokeVariants}
-        fill="none"
-        strokeWidth={2}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        className="stroke-primary"
-      />
-      {pts.map(([x, y], i) => {
-        const d = data[i]!
-        // Сегодняшняя точка крупнее — остальные дни недели ровнее.
-        const isLast = i === currentIndex
-        const has = d.value > 0
-        return (
-          <motion.g key={`${d.name}-${i}`} variants={dotVariants} style={{ originX: x, originY: y }}>
-            <circle
-              cx={x}
-              cy={y}
-              r={isLast ? 3.5 : 2.5}
-              className={has || isLast ? accentClass : mutedClass}
-            >
-              <title>{d.title ?? `${d.name}: ${d.label ?? d.value}`}</title>
-            </circle>
-            {d.label && has && (
-              <text
-                x={x}
-                y={y - 6}
-                textAnchor="middle"
-                className="fill-muted-foreground"
-                style={{ fontSize: 9 }}
+    <div className="flex w-full flex-col gap-1">
+      <svg viewBox={`0 0 ${w} ${h}`} className="h-11 w-full" role="img">
+        <line
+          x1={padX}
+          y1={baseline}
+          x2={w - padX}
+          y2={baseline}
+          className="stroke-border"
+          strokeWidth={1}
+        />
+        <motion.polygon points={area} variants={areaVariants} className="fill-primary/15" />
+        <motion.polyline
+          points={polyline}
+          variants={strokeVariants}
+          fill="none"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          className="stroke-primary"
+        />
+        {pts.map(([x, y], i) => {
+          const d = data[i]!
+          const isLast = i === currentIndex
+          const has = d.value > 0
+          return (
+            <g key={`${d.name}-${i}`}>
+              <motion.circle
+                cx={x}
+                cy={y}
+                r={isLast ? 3.5 : 2.5}
+                variants={dotVariants}
+                className={has || isLast ? accentClass : mutedClass}
               >
-                {d.label}
-              </text>
-            )}
-            <text
-              x={x}
-              y={labelY}
-              textAnchor="middle"
-              className="fill-muted-foreground"
-              style={{ fontSize: 9 }}
-            >
-              {d.name}
-            </text>
-          </motion.g>
-        )
-      })}
-    </svg>
+                <title>{d.title ?? `${d.name}: ${d.label ?? d.value}`}</title>
+              </motion.circle>
+              {d.label && has && (
+                <text
+                  x={x}
+                  y={y - 6}
+                  textAnchor="middle"
+                  fill="var(--muted-foreground)"
+                  style={{ fontSize: 9 }}
+                >
+                  {d.label}
+                </text>
+              )}
+            </g>
+          )
+        })}
+      </svg>
+      {/* Дни вне SVG/motion — иначе подписи пропадают после анимации точек. */}
+      <div className="flex w-full" style={{ paddingLeft: sidePad, paddingRight: sidePad }}>
+        {data.map((d, i) => (
+          <span
+            key={`${d.name}-${i}`}
+            className="flex-1 text-center text-[10px] leading-none text-muted-foreground"
+          >
+            {d.name}
+          </span>
+        ))}
+      </div>
+    </div>
   )
 }
 
