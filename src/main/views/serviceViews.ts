@@ -1,4 +1,13 @@
-import { WebContentsView, session, shell, type BaseWindow, type Rectangle, type Session, type WebContents } from 'electron'
+import {
+  WebContentsView,
+  desktopCapturer,
+  session,
+  shell,
+  type BaseWindow,
+  type Rectangle,
+  type Session,
+  type WebContents
+} from 'electron'
 import type { BrowserState, BrowserTabState, EnvConfig, ServiceConfig } from '@shared/types'
 import { hostLabel, resolveBrowserInput } from '@shared/browserUrl'
 import { getConfig, getEnv } from '../config/store'
@@ -72,12 +81,21 @@ export class ServiceViewManager {
   private chrome = new Map<string, ViewChrome>()
   /** Последний freeze-кадр (data URL), пока view спрятан под другим окном. */
   private snapshots = new Map<string, string>()
-  /** Сессии, на которые уже повешен обработчик разрешений (он один на сессию). */
+  /** Сессии, на которые уже повешены permission / display-media хендлеры. */
   private guardedSessions = new WeakSet<Session>()
   /** Во вкладке печатали руками — автологин туда больше не лезет. */
   private typedIn = new Set<string>()
   /** Автоотправка формы — не больше одного раза на вкладку. */
   private autoSubmitted = new Set<string>()
+  /** id вебвью, у которых сейчас идёт загрузка main-frame. */
+  private loadingIds = new Set<string>()
+  /**
+   * Ещё ни разу не дорисовали страницу — show() не поднимает view, чтобы
+   * под ним был виден DOM-спиннер (WebContentsView всегда поверх React).
+   */
+  private awaitingFirstLoad = new Set<string>()
+  /** Рендереру — спиннер в хроме окна / браузера. */
+  onLoadingChange: ((id: string, loading: boolean) => void) | null = null
   /**
    * Экран заблокирован или идёт заставка. Нативный WebContentsView рисуется
    * поверх любого DOM, поэтому запрет живёт здесь, а не в рендерере: иначе
@@ -124,21 +142,46 @@ export class ServiceViewManager {
     return null
   }
 
+  private setLoading(id: string, loading: boolean): void {
+    const was = this.loadingIds.has(id)
+    if (loading) this.loadingIds.add(id)
+    else this.loadingIds.delete(id)
+    if (was === loading) return
+    this.onLoadingChange?.(id, loading)
+    // Первая отрисовка закончилась — если view «должен» быть видим, поднимем.
+    if (!loading && this.awaitingFirstLoad.delete(id) && this.visible.has(id) && !this.suppressed) {
+      const view = this.views.get(id)
+      if (view) {
+        this.applyChrome(id, view)
+        view.setVisible(true)
+        this.win.contentView.addChildView(view)
+        this.scheduleSnapshot(id)
+      }
+    }
+  }
+
+  isLoading(id: string): boolean {
+    return this.loadingIds.has(id)
+  }
+
   /**
-   * Переходы на `ktalk://` и подобные Electron пропускает через разрешение
-   * `openExternal` (по умолчанию — да). Сессия общая на контур, поэтому решаем
-   * по вкладке: отказываем только сервисам, которым это запрещено. Остальные
-   * разрешения (камера, микрофон для звонков и т.д.) — как и были, разрешены.
+   * Разрешения сессии контура: камера/мик/экран — да; `ktalk://` из встроенного
+   * Толка — нет. Плюс `setDisplayMediaRequestHandler`: без него
+   * `getDisplayMedia` из вебвью просто зависает (кнопка «Демонстрация» молчит).
    */
-  private guardExternalApps(ses: Session): void {
+  private guardSession(ses: Session): void {
     if (this.guardedSessions.has(ses)) return
     this.guardedSessions.add(ses)
+
     ses.setPermissionRequestHandler((wc, permission, callback, details) => {
       if (permission === 'openExternal') {
         const id = this.serviceIdOf(wc)
         const svc = id ? getConfig().services.find((x) => x.id === id) : undefined
         if (blocksExternalApps(svc)) {
-          const scheme = ('externalURL' in details && details.externalURL ? details.externalURL : '').split(':')[0]
+          const scheme = ('externalURL' in details && details.externalURL
+            ? details.externalURL
+            : ''
+          ).split(':')[0]
           logInfo('views', `${id}: запуск внешнего приложения заблокирован (${scheme}:)`)
           callback(false)
           return
@@ -146,6 +189,73 @@ export class ServiceViewManager {
       }
       callback(true)
     })
+
+    ses.setPermissionCheckHandler((wc, permission, _origin, details) => {
+      if (permission === 'openExternal') {
+        const id = wc && !wc.isDestroyed() ? this.serviceIdOf(wc) : null
+        const svc = id ? getConfig().services.find((x) => x.id === id) : undefined
+        if (blocksExternalApps(svc)) return false
+      }
+      if (
+        permission === 'media' ||
+        permission === 'display-capture' ||
+        permission === 'fullscreen' ||
+        permission === 'pointerLock'
+      ) {
+        return true
+      }
+      // Остальное — как request handler: не блокируем звонки и WebRTC.
+      void details
+      return true
+    })
+
+    // macOS 15+: системный пикер экрана. Иначе — первый screen, чтобы запрос
+    // не висел вечно без UI (свой пикер можно добавить позже).
+    ses.setDisplayMediaRequestHandler(
+      async (request, callback) => {
+        try {
+          const sources = await desktopCapturer.getSources({
+            types: ['screen', 'window'],
+            thumbnailSize: { width: 0, height: 0 },
+            fetchWindowIcons: false
+          })
+          const screen = sources.find((s) => s.id.startsWith('screen:')) ?? sources[0]
+          if (!screen) {
+            callback({})
+            return
+          }
+          callback({
+            video: screen,
+            ...(request.audioRequested ? { audio: 'loopback' as const } : {})
+          })
+        } catch (e) {
+          logInfo('views', `display-media: ${e instanceof Error ? e.message : String(e)}`)
+          callback({})
+        }
+      },
+      { useSystemPicker: true }
+    )
+  }
+
+  /**
+   * Кастомные схемы (`ktalk://` и т.п.) нельзя отпускать в навигацию: Chromium
+   * успевает выгрузить страницу, потом получает ERR_ABORTED (−3) — а мы его
+   * глотаем → чёрный экран без error-page. Режем на will-navigate.
+   */
+  private attachNavGuards(wc: WebContents, viewId: string): void {
+    wc.on('will-navigate', (event, url) => {
+      if (/^https?:\/\//i.test(url) || url.startsWith('about:') || url.startsWith('data:')) return
+      event.preventDefault()
+      const svc = getConfig().services.find((x) => x.id === viewId)
+      if (blocksExternalApps(svc)) {
+        logInfo('views', `${viewId}: переход на ${url.split(':')[0]}: заблокирован`)
+        return
+      }
+      if (/^[a-z][a-z0-9+.-]*:/i.test(url)) void shell.openExternal(url)
+    })
+
+    wc.on('did-start-loading', () => this.setLoading(viewId, true))
+    wc.on('did-stop-loading', () => this.setLoading(viewId, false))
   }
 
   /**
@@ -162,7 +272,7 @@ export class ServiceViewManager {
     if (env.caCertPath || env.allowInsecureTls) {
       ses.setCertificateVerifyProc((_request, callback) => callback(0))
     }
-    this.guardExternalApps(ses)
+    this.guardSession(ses)
     return ses
   }
 
@@ -213,6 +323,7 @@ export class ServiceViewManager {
     })
 
     const wc = view.webContents
+    this.attachNavGuards(wc, service.id)
 
     wc.on('certificate-error', (event, _url, error, _cert, callback) => {
       if (env.caCertPath || env.allowInsecureTls) {
@@ -228,7 +339,17 @@ export class ServiceViewManager {
     })
 
     wc.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
-      if (!isMainFrame || errorCode === -3) return
+      if (!isMainFrame) return
+      // −3 = ABORTED. Часто остаток отрезанного ktalk:// — если страница уже
+      // пустая, возвращаем на baseUrl, иначе просто молчим (обычный stop/redirect).
+      if (errorCode === -3) {
+        const cur = wc.getURL()
+        if ((!cur || cur === 'about:blank') && service.baseUrl) {
+          logInfo('views', `${service.id}: пустая вкладка после abort → ${service.baseUrl}`)
+          void wc.loadURL(service.baseUrl)
+        }
+        return
+      }
       this.showErrorPage(view, `Сервис «${service.name}» не открылся`, {
         code: String(errorCode),
         desc: errorDescription,
@@ -270,8 +391,10 @@ export class ServiceViewManager {
 
     view.setVisible(false)
     this.win.contentView.addChildView(view)
-    void wc.loadURL(service.baseUrl)
     this.views.set(service.id, view)
+    this.awaitingFirstLoad.add(service.id)
+    this.setLoading(service.id, true)
+    void wc.loadURL(service.baseUrl)
     return view
   }
 
@@ -378,9 +501,15 @@ export class ServiceViewManager {
 
     const wasHidden = !this.visible.has(serviceId)
     this.applyChrome(serviceId, view)
-    view.setVisible(true)
-    this.win.contentView.addChildView(view)
     this.visible.add(serviceId)
+    // Пока первая загрузка не закончилась — чёрный пустой WebContentsView
+    // не показываем: под ним крутится DOM-спиннер в ServiceHost/BrowserHost.
+    if (!this.awaitingFirstLoad.has(serviceId)) {
+      view.setVisible(true)
+      this.win.contentView.addChildView(view)
+    } else {
+      view.setVisible(false)
+    }
 
     // Вкладку браузера показ никуда не ведёт: её адрес задаёт только адресная
     // строка, а не окно, которое вкладку показывает.
@@ -393,7 +522,7 @@ export class ServiceViewManager {
     }
     // Свежий кадр для следующего freeze — не стираем старый, пока новый не готов
     // (иначе при драге DOM-окна поверх будет пустой placeholder).
-    if (wasHidden) this.scheduleSnapshot(serviceId)
+    if (wasHidden && !this.awaitingFirstLoad.has(serviceId)) this.scheduleSnapshot(serviceId)
     return true
   }
 
@@ -445,9 +574,13 @@ export class ServiceViewManager {
       if (!view) continue
       const wasHidden = !this.visible.has(id)
       this.applyChrome(id, view)
+      this.visible.add(id)
+      if (this.awaitingFirstLoad.has(id)) {
+        view.setVisible(false)
+        continue
+      }
       view.setVisible(true)
       this.win.contentView.addChildView(view)
-      this.visible.add(id)
       if (wasHidden) this.scheduleSnapshot(id)
     }
   }
@@ -734,6 +867,7 @@ export class ServiceViewManager {
       }
     })
     const wc = view.webContents
+    this.attachNavGuards(wc, tab.id)
 
     // Своих окон у вебвью быть не должно: target=_blank и window.open
     // становятся новой вкладкой рядом с этой — как в любом браузере.
@@ -790,6 +924,8 @@ export class ServiceViewManager {
     wc.on('page-favicon-updated', (_e, icons) => {
       void this.loadTabFavicon(tab, icons[0])
     })
+    // loading для хрома вкладки (иконка-спиннер) — отдельно от общего
+    // viewLoading: attachNavGuards уже шлёт onLoadingChange.
     wc.on('did-start-loading', () => {
       tab.loading = true
       this.emitBrowser()
@@ -840,6 +976,7 @@ export class ServiceViewManager {
     view.setVisible(false)
     this.win.contentView.addChildView(view)
     this.views.set(tab.id, view)
+    this.awaitingFirstLoad.add(tab.id)
     return view
   }
 
@@ -882,6 +1019,8 @@ export class ServiceViewManager {
     this.chrome.delete(serviceId)
     this.snapshots.delete(serviceId)
     this.views.delete(serviceId)
+    this.setLoading(serviceId, false)
+    this.awaitingFirstLoad.delete(serviceId)
     // Вкладку закрыли — следующая откроется с чистого листа, и автологин
     // снова сможет сработать (например, после истечения сессии).
     this.typedIn.delete(serviceId)

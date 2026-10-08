@@ -1,13 +1,15 @@
-import { request } from 'undici'
 import type { Item, MailMailbox, MailRule, MailRuleUpsert } from '@shared/types'
-import { dispatcherFor, resetDispatcher } from '../net/transport'
 import { base, stripHtml } from './http'
+import { easHttpPost, type EasAuthMode } from './eas/http'
 import { itemId, type Connector, type PruneWindow, type SyncContext, type SyncResult } from './types'
 import { syncJmap } from './jmap'
 import { syncImap } from './imap'
 import { caldavWindow, syncCaldav } from './caldav'
 import { syncEas } from './eas'
 import { logInfo, logError, logWarn } from '../log'
+
+/** Basic → Negotiate: как у EAS. Многие Exchange рвут TCP на Basic вместо 401. */
+const ewsAuthMode = new Map<string, EasAuthMode>()
 
 /**
  * Выполнить источник, но не ронять остальные: ошибку пишем в лог с деталями.
@@ -61,7 +63,11 @@ function isTransientSocketError(err: unknown): boolean {
   )
 }
 
-async function soapOnce(ctx: SyncContext, body: string): Promise<string> {
+async function soapWithAuth(
+  ctx: SyncContext,
+  body: string,
+  authMode: EasAuthMode
+): Promise<{ text: string; status: number; wwwAuth: string }> {
   const envelope = `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
   xmlns:m="${EWS_NS}" xmlns:t="${T_NS}">
@@ -71,60 +77,99 @@ async function soapOnce(ctx: SyncContext, body: string): Promise<string> {
   <soap:Body>${body}</soap:Body>
 </soap:Envelope>`
 
-  // Для Exchange логином обычно служит сам адрес почты — берём его, если
-  // отдельный «Логин» не задан. Авторизация Basic (user:password из keychain).
   const user = ctx.service.auth.username || ctx.service.options.email || ''
-  const basicAuth = `Basic ${Buffer.from(`${user}:${ctx.secret ?? ''}`).toString('base64')}`
-
-  const res = await request(ewsUrl(ctx), {
-    method: 'POST',
-    dispatcher: dispatcherFor(ctx.env),
+  // Тот же транспорт, что EAS: undici Basic или Electron Negotiate/NTLM.
+  // Connection: close — не держим keep-alive через VPN (иначе other side closed).
+  const res = await easHttpPost({
+    url: ewsUrl(ctx),
+    body: Buffer.from(envelope, 'utf8'),
     headers: {
       'content-type': 'text/xml; charset=utf-8',
-      authorization: basicAuth,
-      // Кавычки — как в MSDN / Outlook; без SOAPAction прокси иногда рвёт TCP.
-      SOAPAction: `"${soapAction(body)}"`
+      SOAPAction: `"${soapAction(body)}"`,
+      connection: 'close'
     },
-    body: envelope,
-    headersTimeout: 30_000,
-    bodyTimeout: 60_000
+    user,
+    password: ctx.secret ?? '',
+    env: ctx.env,
+    authMode,
+    headersTimeout: 45_000
   })
-  const text = await res.body.text()
-  if (res.statusCode >= 400) {
-    throw new Error(
-      res.statusCode === 401
-        ? 'Exchange отклонил доступ (401). Проверьте логин и пароль почты.'
-        : `EWS ответил ${res.statusCode}: ${text.slice(0, 160)}`
+  return { text: res.buffer.toString('utf8'), status: res.status, wwwAuth: res.wwwAuth }
+}
+
+function throwIfSoapFailed(text: string, status: number, wwwAuth: string): void {
+  if (status === 401) {
+    throw Object.assign(
+      new Error(
+        /ntlm|negotiate/i.test(wwwAuth)
+          ? 'EWS отклонил вход (401/NTLM). Проверьте доменный логин (DOMAIN\\user) и пароль AD.'
+          : 'EWS отклонил доступ (401). Проверьте логин и пароль почты.'
+      ),
+      { status: 401 as const, wwwAuth }
     )
   }
-  // SOAP Fault при 200 — иначе «успех» с пустым списком правил.
+  if (status >= 400) {
+    throw new Error(`EWS ответил ${status}: ${text.slice(0, 160)}`)
+  }
   if (/<faultcode\b|<s:Fault\b|<soap:Fault\b/i.test(text)) {
     const fault =
       /<(?:faultstring|s:faultstring|soap:faultstring)[^>]*>([\s\S]*?)<\//i.exec(text)?.[1]?.trim() ??
       text.slice(0, 200)
     throw new Error(`EWS: ${fault.replace(/<[^>]+>/g, '').slice(0, 220)}`)
   }
-  return text
 }
 
 async function soap(ctx: SyncContext, body: string): Promise<string> {
+  const sid = ctx.service.id
+  let mode = ewsAuthMode.get(sid) ?? 'basic'
+
+  const run = async (authMode: EasAuthMode): Promise<string> => {
+    const res = await soapWithAuth(ctx, body, authMode)
+    throwIfSoapFailed(res.text, res.status, res.wwwAuth)
+    return res.text
+  }
+
   try {
-    return await soapOnce(ctx, body)
+    return await run(mode)
   } catch (err) {
-    if (!isTransientSocketError(err)) throw err
-    // После VPN/idle keep-alive сокет мёртв — undici отдаёт «other side closed».
-    logWarn('mail', `EWS socket: ${err instanceof Error ? err.message : String(err)} — retry`)
-    resetDispatcher(ctx.env.id)
-    try {
-      return await soapOnce(ctx, body)
-    } catch (retryErr) {
-      if (isTransientSocketError(retryErr)) {
-        throw new Error(
-          'EWS оборвал соединение. Проверьте VPN/ewsUrl и что контур поднят, затем повторите.'
-        )
+    const www =
+      err && typeof err === 'object' && 'wwwAuth' in err
+        ? String((err as { wwwAuth?: unknown }).wwwAuth ?? '')
+        : ''
+    const status =
+      err && typeof err === 'object' && 'status' in err
+        ? Number((err as { status?: unknown }).status)
+        : 0
+
+    // Basic отвергнут с NTLM challenge или сокет оборван — как у EAS, пробуем Negotiate.
+    if (
+      mode === 'basic' &&
+      (status === 401 || isTransientSocketError(err) || /ntlm|negotiate/i.test(www))
+    ) {
+      logWarn(
+        'mail',
+        `EWS ${isTransientSocketError(err) ? 'socket' : '401'} Basic → negotiate (${ctx.service.id})`
+      )
+      mode = 'negotiate'
+      ewsAuthMode.set(sid, mode)
+      try {
+        return await run(mode)
+      } catch (retryErr) {
+        if (isTransientSocketError(retryErr)) {
+          throw new Error(
+            'EWS оборвал соединение (NTLM). Проверьте VPN, ewsUrl и что контур поднят.'
+          )
+        }
+        throw retryErr
       }
-      throw retryErr
     }
+
+    if (isTransientSocketError(err)) {
+      throw new Error(
+        'EWS оборвал соединение. Проверьте VPN/ewsUrl и что контур поднят, затем повторите.'
+      )
+    }
+    throw err
   }
 }
 

@@ -288,7 +288,7 @@ export function Browser({
       </div>
 
       {/* ── Адресная строка ────────────────────────────────────────── */}
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-white/10 bg-muted/20 px-1.5">
+      <div className="relative flex h-9 shrink-0 items-center gap-1 border-b border-white/10 bg-muted/20 px-1.5">
         <Button
           type="button"
           size="icon-xs"
@@ -390,6 +390,14 @@ export function Browser({
         >
           <SquareCode className="size-3.5" />
         </Button>
+        {active?.loading && (
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] overflow-hidden"
+            aria-hidden
+          >
+            <div className="kontur-view-loading-bar h-full w-1/3 bg-primary" />
+          </div>
+        )}
       </div>
 
       {/* ── Страница ───────────────────────────────────────────────── */}

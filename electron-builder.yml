@@ -32,6 +32,9 @@ mac:
   extendInfo:
     # Чтобы Notification Center показывал баннеры Kontur.
     NSUserNotificationAlertStyle: alert
+    # Толк / WebRTC в WebContentsView — без строк macOS молча режет media.
+    NSCameraUsageDescription: Kontur использует камеру для видеозвонков (Толк и другие сервисы).
+    NSMicrophoneUsageDescription: Kontur использует микрофон для звонков (Толк и другие сервисы).
 afterPack: scripts/afterPack.cjs
 linux:
   icon: build/icon.png

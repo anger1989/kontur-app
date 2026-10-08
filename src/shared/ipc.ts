@@ -50,6 +50,9 @@ export const CH = {
   viewDevTools: 'view:devtools',
   /** Полный запрет показа вебвью: блокировка экрана и заставка. */
   viewSuppress: 'view:suppress',
+  /** Main → renderer: вебвью грузится (для спиннера в хроме). */
+  viewLoading: 'view:loading',
+  viewLoadingChanged: 'view:loadingChanged',
 
   /* Встроенный браузер. Вкладки живут в main рядом со своими WebContentsView,
      рендерер рисует только хром и получает состояние через browserChanged. */

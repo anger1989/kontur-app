@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import { Globe } from 'lucide-react'
+import { Globe, Loader2 } from 'lucide-react'
 import { showServiceView, useStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { RESIZE_INSET, useViewBounds, WINDOW_CORNER_RADIUS } from '@/lib/viewHost'
@@ -33,6 +33,21 @@ export function ServiceHost({
   const openWindow = useStore((s) => s.openWindow)
   const maximized = layout?.maximized ?? false
   const [snap, setSnap] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void window.kontur.view.isLoading(serviceId).then((on) => {
+      if (!cancelled) setLoading(on)
+    })
+    const off = window.kontur.view.onLoading((id, on) => {
+      if (id === serviceId) setLoading(on)
+    })
+    return () => {
+      cancelled = true
+      off()
+    }
+  }, [serviceId])
 
   // Живой ↔ freeze. freeze() на main: hide сразу, кадр из кэша.
   useEffect(() => {
@@ -81,6 +96,14 @@ export function ServiceHost({
           <Button variant="outline" size="sm" onClick={() => openWindow({ kind: 'page', page: 'settings' })}>
             Открыть настройки
           </Button>
+        </div>
+      )}
+      {/* Видно, пока вебвью ещё не показан / под freeze. Поверх живого
+          WebContentsView DOM не рисуется — там спиннер в titlebar окна. */}
+      {service?.baseUrl && loading && !frozen && (
+        <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col items-center justify-center gap-2 text-muted-foreground">
+          <Loader2 className="size-6 animate-spin" />
+          <p className="text-[12px]">Загрузка…</p>
         </div>
       )}
       {frozen && (

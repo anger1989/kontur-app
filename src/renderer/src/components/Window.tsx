@@ -1,6 +1,16 @@
-import { useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import { motion } from 'motion/react'
-import { ArrowLeft, BookmarkPlus, House, Link2, Maximize2, Minus, RefreshCw, X } from 'lucide-react'
+import {
+  ArrowLeft,
+  BookmarkPlus,
+  House,
+  Link2,
+  Loader2,
+  Maximize2,
+  Minus,
+  RefreshCw,
+  X
+} from 'lucide-react'
 import { toast } from '@/components/ui/toast'
 import { nativeViewId, showServiceView, useStore, windowTitle, type DeskWindow } from '@/store'
 import { Button } from '@/components/ui/button'
@@ -128,6 +138,26 @@ export function Window({
   const [genieOut, setGenieOut] = useState(false)
   /** Вебвью только после genie-in / maximize spring — иначе bounds плывут. */
   const [serviceReady, setServiceReady] = useState(() => !win?.fromDock)
+  /** Загрузка нативного вебвью — спиннер в titlebar (DOM выше WebContentsView). */
+  const [viewLoading, setViewLoading] = useState(false)
+
+  useEffect(() => {
+    if (!viewId) {
+      setViewLoading(false)
+      return
+    }
+    let cancelled = false
+    void window.kontur.view.isLoading(viewId).then((on) => {
+      if (!cancelled) setViewLoading(on)
+    })
+    const off = window.kontur.view.onLoading((id, loading) => {
+      if (id === viewId) setViewLoading(loading)
+    })
+    return () => {
+      cancelled = true
+      off()
+    }
+  }, [viewId])
 
   if (!win) return null
 
@@ -310,7 +340,7 @@ export function Window({
       >
       <div
         className={cn(
-          'no-drag flex h-9 shrink-0 items-center gap-2 border-b border-white/10 bg-muted/40 px-3',
+          'no-drag relative flex h-9 shrink-0 items-center gap-2 border-b border-white/10 bg-muted/40 px-3',
           arranged ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
         )}
         onPointerDown={onTitlePointerDown}
@@ -353,6 +383,9 @@ export function Window({
           <span className="size-2 shrink-0 rounded-full" style={{ background: env?.accent }} />
         )}
         {isService && <ServiceIcon serviceId={service?.id ?? ''} kind={service?.kind ?? ''} size={14} />}
+        {isService && viewLoading && (
+          <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" aria-hidden />
+        )}
         <span className="min-w-0 flex-1 truncate text-center text-[12px] font-medium select-none">
           {title}
         </span>
@@ -387,7 +420,7 @@ export function Window({
               onPointerDown={(e) => e.stopPropagation()}
               onClick={() => void window.kontur.view.reload(service.id)}
             >
-              <RefreshCw className="size-3" />
+              <RefreshCw className={cn('size-3', viewLoading && 'animate-spin')} />
             </Button>
             <Button
               type="button"
@@ -430,6 +463,15 @@ export function Window({
             >
               <BookmarkPlus className="size-3" />
             </Button>
+          </div>
+        )}
+        {/* Полоска прогресса под titlebar — WebContentsView рисуется ниже и её не кроет. */}
+        {isService && viewLoading && (
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] overflow-hidden"
+            aria-hidden
+          >
+            <div className="kontur-view-loading-bar h-full w-1/3 bg-primary" />
           </div>
         )}
       </div>

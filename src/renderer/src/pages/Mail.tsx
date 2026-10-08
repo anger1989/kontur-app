@@ -17,7 +17,14 @@ import {
   Trash2,
   X
 } from 'lucide-react'
-import type { Item, MailDetail, MailFolder, MailMailbox, MailRule } from '@shared/types'
+import type {
+  Item,
+  MailDetail,
+  MailFolder,
+  MailMailbox,
+  MailRule,
+  ServiceConfig
+} from '@shared/types'
 import { useStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -100,6 +107,27 @@ function dateCutoff(filter: DateFilter): number | null {
   return null
 }
 
+/** Inbox rules только через EWS (exchange или eas + ewsUrl/webUrl). */
+function mailSupportsRules(s: ServiceConfig): boolean {
+  const protocol = s.options.protocol || (s.options.jmapUrl ? 'jmap' : 'eas')
+  if (protocol === 'exchange') return true
+  if (protocol === 'eas') {
+    return Boolean(s.options.ewsUrl?.trim() || s.options.webUrl?.trim())
+  }
+  return false
+}
+
+function mailboxLabel(s: ServiceConfig, envName?: string): string {
+  const email = (s.options.email || s.auth.username || '').trim()
+  const bits = [s.name, email || null, envName || null].filter(Boolean)
+  return bits.join(' · ')
+}
+
+function ipcErr(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e)
+  return raw.replace(/^Error invoking remote method '[^']+':\s*/i, '')
+}
+
 /**
  * Полноценный почтовый клиент: список слева (поиск + фильтры + пагинация),
  * письмо справа, ответ. Контур — цветной полоской.
@@ -133,13 +161,15 @@ export function Mail({
   const [newFolderName, setNewFolderName] = useState('')
   const [moveOpen, setMoveOpen] = useState(false)
   const [rulesOpen, setRulesOpen] = useState(false)
-  const [rules, setRules] = useState<MailRule[]>([])
-  const [rulesSupported, setRulesSupported] = useState(false)
-  const [rulesLoading, setRulesLoading] = useState(false)
 
   const unify = config?.unifyMail ?? true
   const mailServices = (config?.services ?? []).filter((s) => s.kind === 'mail' && s.enabled)
   const primaryMail = mailServices[0]
+  /** Ящики, для которых доступны inbox rules (EWS). */
+  const rulesMailServices = useMemo(
+    () => (config?.services ?? []).filter((s) => s.kind === 'mail' && s.enabled && mailSupportsRules(s)),
+    [config?.services]
+  )
 
   const reload = (): void => {
     // 2500 — с запасом под расширенный синк (до ~1200 входящих × 2 контура + Sent/Drafts).
@@ -163,14 +193,6 @@ export function Mail({
     reload()
     reloadFolders()
     return window.kontur.items.onChange(reload)
-  }, [primaryMail?.id])
-
-  useEffect(() => {
-    if (!primaryMail) {
-      setRulesSupported(false)
-      return
-    }
-    void window.kontur.mail.rulesSupported(primaryMail.id).then(setRulesSupported)
   }, [primaryMail?.id])
 
   const unreadCount = useMemo(() => items.filter((it) => it.unread).length, [items])
@@ -339,18 +361,8 @@ export function Mail({
     }
   }
 
-  const openRules = async (): Promise<void> => {
+  const openRules = (): void => {
     setRulesOpen(true)
-    if (!primaryMail || !rulesSupported) return
-    setRulesLoading(true)
-    try {
-      setRules(await window.kontur.mail.listRules({ serviceId: primaryMail.id }))
-    } catch (e) {
-      const raw = e instanceof Error ? e.message : String(e)
-      toast.error(raw.replace(/^Error invoking remote method '[^']+':\s*/i, ''))
-    } finally {
-      setRulesLoading(false)
-    }
   }
 
   const folderLabel = (id: string): string => {
@@ -368,7 +380,17 @@ export function Mail({
             {unreadCount > 0 ? ` · ${unreadCount} непрочит.` : ''}
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={() => void openRules()} disabled={!primaryMail}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={openRules}
+          disabled={rulesMailServices.length === 0}
+          title={
+            rulesMailServices.length === 0
+              ? 'Нужен ящик с EWS (ewsUrl/webUrl) в настройках'
+              : undefined
+          }
+        >
           <ListFilter />
           Правила
         </Button>
@@ -792,14 +814,8 @@ export function Mail({
       <RulesDialog
         open={rulesOpen}
         onOpenChange={setRulesOpen}
-        supported={rulesSupported}
-        loading={rulesLoading}
-        rules={rules}
-        serviceId={primaryMail?.id}
-        onReload={async () => {
-          if (!primaryMail) return
-          setRules(await window.kontur.mail.listRules({ serviceId: primaryMail.id }))
-        }}
+        services={rulesMailServices}
+        envName={(envId) => config?.envs.find((e) => e.id === envId)?.name}
       />
     </div>
   )
@@ -808,20 +824,18 @@ export function Mail({
 function RulesDialog({
   open,
   onOpenChange,
-  supported,
-  loading,
-  rules,
-  serviceId,
-  onReload
+  services,
+  envName
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
-  supported: boolean
-  loading: boolean
-  rules: MailRule[]
-  serviceId?: string
-  onReload: () => Promise<void>
+  services: ServiceConfig[]
+  envName: (envId: string) => string | undefined
 }): JSX.Element {
+  const [serviceId, setServiceId] = useState(services[0]?.id ?? '')
+  const [rules, setRules] = useState<MailRule[]>([])
+  const [loading, setLoading] = useState(false)
+  const [foldersLoading, setFoldersLoading] = useState(false)
   const [name, setName] = useState('')
   const [fromContains, setFromContains] = useState('')
   const [subjectContains, setSubjectContains] = useState('')
@@ -829,35 +843,72 @@ function RulesDialog({
   const [saving, setSaving] = useState(false)
   const [ruleFolders, setRuleFolders] = useState<MailMailbox[]>([])
 
-  // Папки — после списка правил, не параллельно: два EWS сразу через VPN
-  // часто дают SocketError «other side closed».
+  const active = services.find((s) => s.id === serviceId) ?? services[0]
+  const activeId = active?.id ?? ''
+
   useEffect(() => {
-    if (!open || !supported || !serviceId) {
+    if (!open) return
+    if (!services.some((s) => s.id === serviceId)) {
+      setServiceId(services[0]?.id ?? '')
+    }
+  }, [open, services, serviceId])
+
+  const reloadRules = async (id: string): Promise<void> => {
+    if (!id) {
+      setRules([])
+      return
+    }
+    setLoading(true)
+    try {
+      setRules(await window.kontur.mail.listRules({ serviceId: id }))
+    } catch (e) {
+      setRules([])
+      toast.error(ipcErr(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Правила для выбранного ящика.
+  useEffect(() => {
+    if (!open || !activeId) {
+      setRules([])
       setRuleFolders([])
       return
     }
-    if (loading) return
+    void reloadRules(activeId)
+  }, [open, activeId])
+
+  // Папки — строго после правил (не параллельно с listRules).
+  useEffect(() => {
+    if (!open || !activeId || loading) {
+      if (!open || !activeId) setRuleFolders([])
+      return
+    }
     let cancelled = false
+    setFoldersLoading(true)
+    setMoveTo('')
     void window.kontur.mail
-      .listFoldersForRules({ serviceId })
+      .listFoldersForRules({ serviceId: activeId })
       .then((folders) => {
         if (!cancelled) setRuleFolders(folders)
       })
-      .catch(() => {
-        if (!cancelled) setRuleFolders([])
+      .catch((e) => {
+        if (!cancelled) {
+          setRuleFolders([])
+          toast.error(ipcErr(e))
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setFoldersLoading(false)
       })
     return () => {
       cancelled = true
     }
-  }, [open, supported, serviceId, loading])
-
-  const ipcErr = (e: unknown): string => {
-    const raw = e instanceof Error ? e.message : String(e)
-    return raw.replace(/^Error invoking remote method '[^']+':\s*/i, '')
-  }
+  }, [open, activeId, loading])
 
   const create = async (): Promise<void> => {
-    if (!serviceId || !name.trim()) return
+    if (!activeId || !name.trim()) return
     if (!fromContains.trim() && !subjectContains.trim()) {
       toast.error('Укажите условие (от кого или тема)')
       return
@@ -869,7 +920,7 @@ function RulesDialog({
     setSaving(true)
     try {
       await window.kontur.mail.upsertRule({
-        serviceId,
+        serviceId: activeId,
         rule: {
           name: name.trim(),
           enabled: true,
@@ -885,7 +936,7 @@ function RulesDialog({
       setSubjectContains('')
       setMoveTo('')
       try {
-        await onReload()
+        await reloadRules(activeId)
       } catch (e) {
         toast.message('Правило создано, но список не обновился', { description: ipcErr(e) })
         return
@@ -904,71 +955,102 @@ function RulesDialog({
         <DialogHeader>
           <DialogTitle>Правила входящих</DialogTitle>
         </DialogHeader>
-        {!supported ? (
+        {services.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">
             Правила доступны только через EWS. Укажите ewsUrl (или webUrl) в настройках почты.
           </p>
-        ) : loading ? (
-          <p className="text-[13px] text-muted-foreground">Загрузка…</p>
         ) : (
           <div className="space-y-4">
-            <div className="max-h-48 space-y-2 overflow-y-auto">
-              {rules.length === 0 ? (
-                <p className="text-[13px] text-muted-foreground">Правил пока нет.</p>
+            <div className="space-y-1.5">
+              <div className="text-[12px] font-medium text-muted-foreground">Ящик</div>
+              {services.length === 1 ? (
+                <p className="text-[13px] font-medium">
+                  {mailboxLabel(services[0]!, envName(services[0]!.envId))}
+                </p>
               ) : (
-                rules.map((r) => (
-                  <div
-                    key={r.id}
-                    className="flex items-center gap-2 rounded-md border px-3 py-2 text-[13px]"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium">{r.name}</div>
-                      <div className="truncate text-[11px] text-muted-foreground">
-                        {[
-                          r.conditions.fromContains && `от: ${r.conditions.fromContains}`,
-                          r.conditions.subjectContains && `тема: ${r.conditions.subjectContains}`,
-                          r.actions.moveToFolder && '→ папка'
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        if (!serviceId) return
-                        void window.kontur.mail
-                          .setRuleEnabled({
-                            serviceId,
-                            ruleId: r.id,
-                            enabled: !r.enabled
-                          })
-                          .then(onReload)
-                          .catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
-                      }}
-                    >
-                      {r.enabled ? 'Выкл' : 'Вкл'}
-                    </Button>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      onClick={() => {
-                        if (!serviceId) return
-                        void window.kontur.mail
-                          .deleteRule({ serviceId, ruleId: r.id })
-                          .then(onReload)
-                          .catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
-                      }}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </div>
-                ))
+                <Select value={activeId} onValueChange={setServiceId}>
+                  <SelectTrigger size="sm" className="h-8 text-[13px]">
+                    <SelectValue placeholder="Выберите почту…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {services.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {mailboxLabel(s, envName(s.envId))}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             </div>
+
+            {loading ? (
+              <p className="text-[13px] text-muted-foreground">Загрузка правил…</p>
+            ) : (
+              <div className="max-h-48 space-y-2 overflow-y-auto">
+                {rules.length === 0 ? (
+                  <p className="text-[13px] text-muted-foreground">Правил пока нет.</p>
+                ) : (
+                  rules.map((r) => (
+                    <div
+                      key={r.id}
+                      className="flex items-center gap-2 rounded-md border px-3 py-2 text-[13px]"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium">{r.name}</div>
+                        <div className="truncate text-[11px] text-muted-foreground">
+                          {[
+                            r.conditions.fromContains && `от: ${r.conditions.fromContains}`,
+                            r.conditions.subjectContains && `тема: ${r.conditions.subjectContains}`,
+                            r.actions.moveToFolder && '→ папка'
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          void window.kontur.mail
+                            .setRuleEnabled({
+                              serviceId: activeId,
+                              ruleId: r.id,
+                              enabled: !r.enabled
+                            })
+                            .then(() => reloadRules(activeId))
+                            .catch((e) => toast.error(ipcErr(e)))
+                        }}
+                      >
+                        {r.enabled ? 'Выкл' : 'Вкл'}
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={() => {
+                          void window.kontur.mail
+                            .deleteRule({ serviceId: activeId, ruleId: r.id })
+                            .then(() => reloadRules(activeId))
+                            .catch((e) => toast.error(ipcErr(e)))
+                        }}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
             <div className="space-y-2 border-t pt-3">
-              <div className="text-[12px] font-medium">Новое правило</div>
+              <div className="text-[12px] font-medium">
+                Новое правило
+                {active ? (
+                  <span className="font-normal text-muted-foreground">
+                    {' '}
+                    для {active.options.email || active.auth.username || active.name}
+                  </span>
+                ) : null}
+              </div>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -987,9 +1069,11 @@ function RulesDialog({
                 placeholder="Тема содержит…"
                 className="h-8 text-[13px]"
               />
-              <Select value={moveTo} onValueChange={setMoveTo}>
+              <Select value={moveTo} onValueChange={setMoveTo} disabled={foldersLoading}>
                 <SelectTrigger size="sm" className="h-8 text-[13px]">
-                  <SelectValue placeholder="Переместить в…" />
+                  <SelectValue
+                    placeholder={foldersLoading ? 'Загрузка папок…' : 'Переместить в…'}
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {ruleFolders.map((m) => (
@@ -1000,7 +1084,11 @@ function RulesDialog({
                   ))}
                 </SelectContent>
               </Select>
-              <Button size="sm" onClick={() => void create()} disabled={saving || !serviceId}>
+              <Button
+                size="sm"
+                onClick={() => void create()}
+                disabled={saving || !activeId || foldersLoading}
+              >
                 Создать правило
               </Button>
             </div>

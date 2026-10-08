@@ -160,7 +160,16 @@ const api = {
     /** Снять кадр и сразу спрятать view (атомарно для freeze-UI). */
     freeze: (serviceId: string) => invoke<string | null>(CH.viewFreeze, serviceId),
     devTools: (serviceId: string) => invoke<void>(CH.viewDevTools, serviceId),
-    suppress: (on: boolean) => invoke<void>(CH.viewSuppress, on)
+    suppress: (on: boolean) => invoke<void>(CH.viewSuppress, on),
+    /** Сейчас ли вебвью в did-start…did-stop loading. */
+    isLoading: (serviceId: string) => invoke<boolean>(CH.viewLoading, serviceId),
+    onLoading: (cb: (id: string, loading: boolean) => void) => {
+      const h = (_e: unknown, p: { id: string; loading: boolean }): void => cb(p.id, p.loading)
+      ipcRenderer.on(CH.viewLoadingChanged, h)
+      return (): void => {
+        ipcRenderer.off(CH.viewLoadingChanged, h)
+      }
+    }
   },
   /**
    * Встроенный браузер. Сами страницы живут в нативных WebContentsView (как и

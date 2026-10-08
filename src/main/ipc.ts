@@ -219,6 +219,7 @@ export function registerIpc(getWin: () => BrowserWindow | null, views: () => Ser
   ipcMain.handle(CH.viewFreeze, (_e, id: string) => views()?.freeze(id) ?? null)
   ipcMain.handle(CH.viewDevTools, (_e, id: string) => views()?.openDevTools(id))
   ipcMain.handle(CH.viewSuppress, (_e, on: boolean) => views()?.setSuppressed(Boolean(on)))
+  ipcMain.handle(CH.viewLoading, (_e, id: string) => views()?.isLoading(id) ?? false)
 
   /* ── Встроенный браузер ────────────────────────────────────────── */
   // Вкладки живут в том же менеджере, что и сервисы: показ, bounds и freeze

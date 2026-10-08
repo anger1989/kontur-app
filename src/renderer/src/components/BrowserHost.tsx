@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import { Globe } from 'lucide-react'
+import { Globe, Loader2 } from 'lucide-react'
 import { showServiceView } from '@/store'
 import { RESIZE_INSET, useViewBounds, WINDOW_CORNER_RADIUS } from '@/lib/viewHost'
 import { cn } from '@/lib/utils'
@@ -32,6 +32,7 @@ export function BrowserHost({
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const [snap, setSnap] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
 
   useViewBounds(ref, tabId, {
     inset: maximized ? 0 : RESIZE_INSET,
@@ -39,6 +40,24 @@ export function BrowserHost({
     borderRadius: maximized ? 0 : WINDOW_CORNER_RADIUS,
     rect
   })
+
+  useEffect(() => {
+    if (!tabId) {
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    void window.kontur.view.isLoading(tabId).then((on) => {
+      if (!cancelled) setLoading(on)
+    })
+    const off = window.kontur.view.onLoading((id, on) => {
+      if (id === tabId) setLoading(on)
+    })
+    return () => {
+      cancelled = true
+      off()
+    }
+  }, [tabId])
 
   // Живой ↔ freeze. freeze() на main: hide сразу, кадр из кэша.
   useEffect(() => {
@@ -76,6 +95,12 @@ export function BrowserHost({
         <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
           <Globe className="size-7" />
           <p className="text-[13px]">Нет открытых вкладок</p>
+        </div>
+      )}
+      {tabId && loading && !frozen && (
+        <div className="pointer-events-none absolute inset-0 z-[1] flex flex-col items-center justify-center gap-2 text-muted-foreground">
+          <Loader2 className="size-6 animate-spin" />
+          <p className="text-[12px]">Загрузка…</p>
         </div>
       )}
       {frozen && tabId && (

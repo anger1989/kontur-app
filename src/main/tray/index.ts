@@ -21,6 +21,7 @@ import { extractMeetingUrl } from '../notify/meetingLink'
 export type { NavTarget }
 
 let tray: Tray | null = null
+let trayMenu: Menu | null = null
 let getWin: (() => BrowserWindow | null) | null = null
 
 function icon(): Electron.NativeImage {
@@ -212,7 +213,9 @@ export function rebuildTrayMenu(): void {
   })
   template.push({ type: 'separator' })
   template.push({ label: 'Выйти', role: 'quit' })
-  tray.setContextMenu(Menu.buildFromTemplate(template))
+  // Не setContextMenu: на macOS левый клик тоже открывал бы меню.
+  // Меню только по правому — через popUpContextMenu в right-click.
+  trayMenu = Menu.buildFromTemplate(template)
 }
 
 export function initTray(getWindow: () => BrowserWindow | null): void {
@@ -220,7 +223,11 @@ export function initTray(getWindow: () => BrowserWindow | null): void {
   getWin = getWindow
   tray = new Tray(icon())
   tray.setToolTip('Kontur')
+  // ЛКМ — показать окно; ПКМ — меню (setContextMenu на macOS ломает это).
   tray.on('click', showApp)
+  tray.on('right-click', () => {
+    if (trayMenu) tray?.popUpContextMenu(trayMenu)
+  })
   rebuildTrayMenu()
   // Статус контуров меняется — обновляем подписи в меню.
   health.on('change', () => rebuildTrayMenu())
@@ -229,6 +236,7 @@ export function initTray(getWindow: () => BrowserWindow | null): void {
 export function destroyTray(): void {
   tray?.destroy()
   tray = null
+  trayMenu = null
   getWin = null
 }
 

@@ -655,3 +655,16 @@
 .animate-card-beam {
   animation: card-beam-move 5s linear infinite alternate;
 }
+
+/* Индикатор загрузки вебвью в titlebar / адресной строке — как progress в Chrome. */
+@keyframes kontur-view-loading-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+.kontur-view-loading-bar {
+  animation: kontur-view-loading-slide 1.1s ease-in-out infinite;
+}
