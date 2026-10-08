@@ -1,10 +1,10 @@
 /**
  * Полоса снизу, куда окна/WebContentsView не заезжают.
- * bottom-3 (12) + h-[4.75rem] дока (76) + запас под magnification/tooltip (~24):
- * иначе при hover плитки растут вверх и уходят ПОД нативный вебвью
- * (DOM-док никогда не выше WebContentsView).
+ * bottom-3 (12) + h-[4.75rem] дока (76) ≈ 88; +пара px воздуха.
+ * Большой запас под magnification давал дыру обоев при maximize — не надо:
+ * иконки на hover чуть могут зайти под вебвью, зато окно садится к доку.
  */
-export const DOCK_CLEARANCE = 112
+export const DOCK_CLEARANCE = 90
 
 /** Геометрия развёрнутого окна — всегда с зазором под док. */
 export function maximizedRect(desktop: { width: number; height: number }): DeskRect {
