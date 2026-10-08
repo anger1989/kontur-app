@@ -3,6 +3,8 @@ import { TitleBar } from '@/components/TitleBar'
 import { Desktop } from '@/components/Desktop'
 import { Dock } from '@/components/Dock'
 import { WindowSwitcher } from '@/components/WindowSwitcher'
+import { HotkeysDialog } from '@/components/HotkeysDialog'
+import { EnvEditorHost } from '@/components/EnvEditorHost'
 import { IdleGuard } from '@/components/IdleGuard'
 import { LoadingScreen } from '@/components/LoadingScreen'
 import { Onboarding } from '@/components/Onboarding'
@@ -98,6 +100,8 @@ export default function App(): JSX.Element {
         </div>
 
         <WindowSwitcher />
+        <HotkeysDialog />
+        <EnvEditorHost />
         <Toaster />
       </div>
     </IdleGuard>

@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react'
-import { LayoutGrid, Settings2, type LucideIcon } from 'lucide-react'
+import { Keyboard, LayoutGrid, Settings2, type LucideIcon } from 'lucide-react'
 import { useStore } from '@/store'
 import { EnvStatusMenu, EnvTrayConnectBridge } from '@/components/EnvStatusMenu'
 import type { TunnelState } from '@shared/types'
@@ -57,10 +57,13 @@ export function TitleBar(): JSX.Element {
   const statuses = useStore((s) => s.statuses)
   const openWindow = useStore((s) => s.openWindow)
   const arrangeWindows = useStore((s) => s.arrangeWindows)
+  const setHotkeysOpen = useStore((s) => s.setHotkeysOpen)
   const arranged = useStore((s) => s.arranged)
   const hasOpenWindows = useStore((s) => s.windows.some((w) => !w.minimized))
   const [now, setNow] = useState(() => new Date())
   const [layout, setLayout] = useState<{ short: string; name: string } | null>(null)
+  /** Развёрнуто / fullscreen — нативный светофор скрыт, кнопки уезжают влево. */
+  const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 15_000)
@@ -70,6 +73,10 @@ export function TitleBar(): JSX.Element {
   useEffect(() => {
     void window.kontur.keyboard.layout().then((l) => setLayout({ short: l.short, name: l.name }))
     return window.kontur.keyboard.onLayoutChange((l) => setLayout({ short: l.short, name: l.name }))
+  }, [])
+
+  useEffect(() => {
+    return window.kontur.app.onMaximizedChange(setMaximized)
   }, [])
 
   const time = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
@@ -87,11 +94,15 @@ export function TitleBar(): JSX.Element {
   }
 
   return (
-    // Светофор нативный (trafficLightPosition x:14 y:14 в main/index.ts): заканчивается
-    // около 66px, центр по вертикали — 20px. pl-[80px] + внутренний отступ кнопки дают
-    // ~20px до первой иконки. Нижняя линия — inset-тенью, а не border-b: бордер
-    // съедает 1px высоты, и центр иконок уезжал на 19.5px мимо центра светофора.
-    <header className="drag flex h-10 shrink-0 items-center bg-sidebar/55 pr-4 pl-[80px] shadow-[inset_0_-1px_0_rgb(255_255_255/0.1)] backdrop-blur-2xl">
+    // Светофор нативный (trafficLightPosition x:14 y:14): ~66px справа от края.
+    // В maximize/fullscreen светофор пропадает — pl сжимаем, чтобы настройки
+    // и компоновка не висели в пустоте.
+    <header
+      className={cn(
+        'drag flex h-10 shrink-0 items-center bg-sidebar/55 pr-4 shadow-[inset_0_-1px_0_rgb(255_255_255/0.1)] backdrop-blur-2xl transition-[padding] duration-200',
+        maximized ? 'pl-3' : 'pl-[80px]'
+      )}
+    >
       <div className="no-drag flex items-center gap-1">
         <TrayButton
           title="Настройки"
@@ -106,6 +117,11 @@ export function TitleBar(): JSX.Element {
             onClick={runArrange}
           />
         )}
+        <TrayButton
+          title="Горячие клавиши"
+          icon={Keyboard}
+          onClick={() => setHotkeysOpen(true)}
+        />
       </div>
       <div className="flex-1" />
       <div className="no-drag flex items-center gap-3 text-[12px] tabular-nums select-none">

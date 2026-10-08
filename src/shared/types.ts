@@ -251,11 +251,20 @@ export const PROFILE_PASSWORD_REF = 'profile.password'
 export type LinkOpenMode = 'app' | 'system'
 
 /** Виджеты рабочего стола. Порядок задаёт стопку по умолчанию. */
-export const WIDGET_IDS = ['day', 'insights', 'meetings', 'todos', 'automations', 'attention'] as const
+export const WIDGET_IDS = [
+  'day',
+  'assistant',
+  'insights',
+  'meetings',
+  'todos',
+  'automations',
+  'attention'
+] as const
 export type WidgetId = (typeof WIDGET_IDS)[number]
 
 export const WIDGET_TITLES: Record<WidgetId, string> = {
   day: 'Мой день',
+  assistant: 'Ассистент',
   insights: 'Метрики',
   meetings: 'Встречи сегодня',
   todos: 'Дела',

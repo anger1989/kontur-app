@@ -13,6 +13,7 @@ import {
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import { takeAssistantRestart } from '@/lib/assistantSession'
 import { cn } from '@/lib/utils'
 
 const KEY_SOUNDS_DOWN: Record<string, [number, number]> = {
@@ -514,6 +515,20 @@ export interface LiveTerminalProps {
    * При активации — fit + focus.
    */
   active?: boolean
+  /**
+   * Именованная PTY-сессия в main. Повторный mount (виджет ↔ окно) подключает
+   * тот же процесс и дописывает scrollback.
+   */
+  sessionKey?: string
+  /** `agent` — Cursor Agent CLI; по умолчанию login-shell. */
+  profile?: 'shell' | 'agent'
+  /**
+   * Не убивать PTY при unmount. Нужно для ассистента: сессия живёт при
+   * переключении виджет ↔ окно и пока виджет скрыт.
+   */
+  keepAlive?: boolean
+  /** Сброс сессии (перезапуск agent): меняется снаружи → kill + create. */
+  restartToken?: number
   /** OSC/title с xterm — для подписи вкладки. */
   onTitle?: (title: string) => void
   /** Сессия завершилась (exit) — вкладка может показать статус. */
@@ -521,7 +536,7 @@ export interface LiveTerminalProps {
 }
 
 /**
- * Живой zsh через node-pty + xterm, в визуале Aceternity Terminal.
+ * Живой zsh / agent через node-pty + xterm, в визуале Aceternity Terminal.
  * Окно приложения даёт свой title bar — здесь `chrome={false}` по умолчанию.
  *
  * Ввод — полный passthrough в PTY (как iTerm/Terminal.app). Локальный
@@ -535,6 +550,10 @@ export function LiveTerminal({
   username,
   cwd,
   active = true,
+  sessionKey,
+  profile,
+  keepAlive = false,
+  restartToken = 0,
   onTitle,
   onExit
 }: LiveTerminalProps): JSX.Element {
@@ -542,6 +561,8 @@ export function LiveTerminal({
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const sessionIdRef = useRef<string | null>(null)
+  const keepAliveRef = useRef(keepAlive)
+  keepAliveRef.current = keepAlive
   const onTitleRef = useRef(onTitle)
   const onExitRef = useRef(onExit)
   onTitleRef.current = onTitle
@@ -602,10 +623,32 @@ export function LiveTerminal({
 
     const boot = async (): Promise<void> => {
       try {
+        // Перезапуск только если seq ещё не применяли (не на каждый remount).
+        if (
+          sessionKey &&
+          restartToken > 0 &&
+          takeAssistantRestart(restartToken)
+        ) {
+          const prev = await window.kontur.terminal.create({
+            cols: term.cols,
+            rows: term.rows,
+            cwd,
+            key: sessionKey,
+            profile
+          })
+          void window.kontur.terminal.kill(prev.id)
+        }
+
         const { cols, rows } = term
-        const session = await window.kontur.terminal.create({ cols, rows, cwd })
+        const session = await window.kontur.terminal.create({
+          cols,
+          rows,
+          cwd,
+          key: sessionKey,
+          profile
+        })
         if (disposed) {
-          void window.kontur.terminal.kill(session.id)
+          if (!keepAliveRef.current) void window.kontur.terminal.kill(session.id)
           return
         }
         sessionIdRef.current = session.id
@@ -613,6 +656,9 @@ export function LiveTerminal({
         const initial = `${username ?? 'kontur'} — ${shellName}`
         setTitle(initial)
         onTitleRef.current?.(shellName)
+
+        // Replay буфера — экран после свёртки в виджет / разворота в окно.
+        if (session.scrollback) term.write(session.scrollback)
 
         term.onTitleChange((t) => {
           const next = t.trim() || shellName
@@ -638,6 +684,14 @@ export function LiveTerminal({
           const id = sessionIdRef.current
           if (id) void window.kontur.terminal.write(id, data)
         })
+
+        // После attach — подогнать размер под текущий хост.
+        try {
+          fit.fit()
+          void window.kontur.terminal.resize(session.id, term.cols, term.rows)
+        } catch {
+          /* ignore */
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         setError(msg)
@@ -665,12 +719,12 @@ export function LiveTerminal({
       offExit?.()
       const id = sessionIdRef.current
       sessionIdRef.current = null
-      if (id) void window.kontur.terminal.kill(id)
+      if (id && !keepAliveRef.current) void window.kontur.terminal.kill(id)
       term.dispose()
       termRef.current = null
       fitRef.current = null
     }
-  }, [cwd, username])
+  }, [cwd, username, sessionKey, profile, restartToken])
 
   // Вкладка снова видна — подогнать размер (пока была скрыта host 0×0) и фокус.
   useEffect(() => {

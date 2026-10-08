@@ -465,11 +465,29 @@ const api = {
       return (): void => {
         ipcRenderer.off(CH.updateAvailable, h)
       }
+    },
+    /** Окно развёрнуто / fullscreen — светофор скрыт, шапка сдвигает кнопки влево. */
+    onMaximizedChange: (cb: (maximized: boolean) => void) => {
+      const h = (_e: unknown, maximized: boolean): void => cb(maximized)
+      ipcRenderer.on(CH.windowMaximizedChanged, h)
+      return (): void => {
+        ipcRenderer.off(CH.windowMaximizedChanged, h)
+      }
     }
   },
   terminal: {
-    create: (opts?: { cols?: number; rows?: number; cwd?: string }) =>
-      invoke<{ id: string; shell: string }>(CH.terminalCreate, opts),
+    create: (opts?: {
+      cols?: number
+      rows?: number
+      cwd?: string
+      /** Именованная сессия — reuse + scrollback (ассистент). */
+      key?: string
+      profile?: 'shell' | 'agent'
+    }) =>
+      invoke<{ id: string; shell: string; scrollback: string; reused: boolean }>(
+        CH.terminalCreate,
+        opts
+      ),
     write: (id: string, data: string) => invoke<void>(CH.terminalWrite, id, data),
     resize: (id: string, cols: number, rows: number) =>
       invoke<void>(CH.terminalResize, id, cols, rows),

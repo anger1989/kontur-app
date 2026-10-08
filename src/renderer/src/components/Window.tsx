@@ -29,6 +29,7 @@ import { Browser } from '@/pages/Browser'
 import { Planner } from '@/pages/Planner'
 import { Settings } from '@/pages/Settings'
 import { TerminalPage } from '@/pages/Terminal'
+import { AssistantPage } from '@/pages/Assistant'
 import { cn } from '@/lib/utils'
 
 const MIN_WIDTH = 420
@@ -85,6 +86,8 @@ function PageContent({ win }: { win: DeskWindow }): JSX.Element | null {
       return <Settings />
     case 'terminal':
       return <TerminalPage />
+    case 'assistant':
+      return <AssistantPage />
   }
 }
 
@@ -165,7 +168,9 @@ export function Window({
   if (!win) return null
 
   const isService = win.route.kind === 'service'
-  const isTerminal = win.route.kind === 'page' && win.route.page === 'terminal'
+  const isTerminal =
+    win.route.kind === 'page' &&
+    (win.route.page === 'terminal' || win.route.page === 'assistant')
   const isBrowser = win.route.kind === 'page' && win.route.page === 'browser'
   /**
    * Окно держит нативный WebContentsView. Для таких окон действуют свои

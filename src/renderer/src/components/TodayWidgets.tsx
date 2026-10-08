@@ -25,6 +25,7 @@ import { useStore } from '@/store'
 import { TodayInsights } from './TodayInsights'
 import { TodayMeetingsCarousel } from './TodayMeetingsCarousel'
 import { TodosWidget } from './TodosWidget'
+import { AssistantWidget } from './AssistantWidget'
 import { AutomationsWidget } from './AutomationsWidget'
 import { GlowingEffect } from '@/components/ui/glowing-effect'
 import { AnimatedList } from '@/components/ui/animated-list'
@@ -561,6 +562,7 @@ export function TodayWidgets(): JSX.Element | null {
     insights: <TodayInsights bare variant="card" />,
     meetings: <TodayMeetingsCarousel glass bare />,
     todos: <TodosWidget bare />,
+    assistant: <AssistantWidget bare />,
     automations: <AutomationsWidget bare />,
     attention: <AttentionWidget bare listHeight={listHeight} />
   }

@@ -65,7 +65,7 @@ export function EnvStatusMenu({
   tunnel: TunnelState
 }): JSX.Element {
   const config = useStore((s) => s.config)
-  const openWindow = useStore((s) => s.openWindow)
+  const openEnvEditor = useStore((s) => s.openEnvEditor)
   const [open, setOpen] = useState(false)
   const { busy, probing, probe, connectOne, disconnectOne, connectAll, otpDialog } =
     useEnvTunnelActions()
@@ -145,7 +145,7 @@ export function EnvStatusMenu({
           <MenuRow
             onClick={() => {
               setOpen(false)
-              openWindow({ kind: 'page', page: 'settings' })
+              openEnvEditor(env.id)
             }}
           >
             <Settings2 className="size-3.5" />

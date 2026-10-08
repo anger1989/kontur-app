@@ -11,6 +11,7 @@ import {
   NotebookPen,
   Search,
   Settings,
+  Sparkles,
   TerminalSquare,
   type LucideIcon
 } from 'lucide-react'
@@ -37,7 +38,8 @@ const PAGE_ICON: Record<AppPage, LucideIcon> = {
   bookmarks: Bookmark,
   browser: Globe,
   settings: Settings,
-  terminal: TerminalSquare
+  terminal: TerminalSquare,
+  assistant: Sparkles
 }
 
 function FallbackIcon({ win }: { win: DeskWindow }): JSX.Element {

@@ -1,4 +1,6 @@
 import { useEffect, type RefObject } from 'react'
+import { DOCK_CLEARANCE, DOCK_MAG_CLEARANCE } from '@/lib/deskLayout'
+import { useStore } from '@/store'
 
 /**
  * Геометрия нативных `WebContentsView` под DOM-окнами.
@@ -8,6 +10,9 @@ import { useEffect, type RefObject } from 'react'
  * место. Этим занят один общий хук: правило про отступ под хэндлы ресайза и
  * радиус скругления должно быть одинаковым у всех хостов, иначе окна начинают
  * отличаться на пиксель.
+ *
+ * Низ экрана под док всегда вырезаем из bounds: иначе maximize на весь стол
+ * накрывает док нативным слоем (DOM z-index тут бессилен).
  */
 
 /** Совпадает с `rounded-xl` у Window. */
@@ -38,6 +43,8 @@ export function useViewBounds(
   const { inset, rect } = opts
   const insetTop = opts.insetTop ?? inset
   const borderRadius = opts.borderRadius ?? WINDOW_CORNER_RADIUS
+  const dockElevated = useStore((s) => s.dockElevated)
+  const deskHeight = useStore((s) => s.desktop.height)
 
   useEffect(() => {
     const el = ref.current
@@ -47,12 +54,20 @@ export function useViewBounds(
     let last = ''
     const pushNow = (): void => {
       const r = el.getBoundingClientRect()
+      const clearance = useStore.getState().dockElevated ? DOCK_MAG_CLEARANCE : DOCK_CLEARANCE
+      const deskH = useStore.getState().desktop.height
+      const maxBottom = Math.max(0, deskH - clearance)
+      let y = Math.round(r.y) + insetTop
+      let height = Math.max(0, Math.round(r.height) - inset - insetTop)
+      if (y + height > maxBottom) {
+        height = Math.max(0, maxBottom - y)
+      }
       const next = {
         serviceId: viewId,
         x: Math.round(r.x) + inset,
-        y: Math.round(r.y) + insetTop,
+        y,
         width: Math.max(0, Math.round(r.width) - inset * 2),
-        height: Math.max(0, Math.round(r.height) - inset - insetTop),
+        height,
         borderRadius
       }
       const key = `${next.x},${next.y},${next.width},${next.height},${next.borderRadius}`
@@ -80,5 +95,5 @@ export function useViewBounds(
       window.removeEventListener('resize', push)
       window.removeEventListener('kontur:view-bounds-tick', push)
     }
-  }, [ref, viewId, inset, insetTop, borderRadius, rect])
+  }, [ref, viewId, inset, insetTop, borderRadius, rect, dockElevated, deskHeight])
 }

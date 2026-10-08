@@ -127,6 +127,8 @@ export const CH = {
   openPage: 'app:openPage',
   openRoute: 'app:openRoute',
   joinMeeting: 'app:joinMeeting',
+  /** Main → renderer: окно развёрнуто / полный экран (светофор скрыт). */
+  windowMaximizedChanged: 'window:maximizedChanged',
   /** Main → renderer: ⌘` / ⌘⇧` из вебвью — листать окна стола. */
   deskCycleWindow: 'desk:cycleWindow',
   /** Main → renderer: отпустили ⌘/Ctrl в вебвью — подтвердить switcher. */

@@ -86,7 +86,8 @@ const api = {
         body: ''
       }),
     openUpdate: () => Promise.resolve(),
-    onUpdateAvailable: () => off
+    onUpdateAvailable: () => off,
+    onMaximizedChange: () => off
   }),
   secrets: group({ available: () => Promise.resolve(false), list: () => Promise.resolve([]) }),
   keyboard: group({ layout: () => Promise.resolve('ru'), onLayoutChange: () => off }),

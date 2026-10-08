@@ -7,6 +7,7 @@ import {
   ListTodo,
   Mail,
   NotebookPen,
+  Sparkles,
   TerminalSquare,
   type LucideIcon
 } from 'lucide-react'
@@ -92,6 +93,7 @@ export function Dock(): JSX.Element {
       | 'browser'
       | 'settings'
       | 'terminal'
+      | 'assistant'
   ): Route => ({
     kind: 'page',
     page: p
@@ -170,6 +172,13 @@ export function Dock(): JSX.Element {
       focused: isFocused(page('terminal')),
       onClick: () => openWindow(page('terminal'))
     },
+    {
+      title: 'Ассистент',
+      icon: <Sparkles className="h-full w-full text-neutral-700 dark:text-white/95" />,
+      open: isOpen(page('assistant')),
+      focused: isFocused(page('assistant')),
+      onClick: () => openWindow(page('assistant'))
+    },
     // Общие сервисы (Mattermost, Толк…) — порядок как в настройках (`order`).
     ...(() => {
       const shared = (config?.services ?? [])
@@ -214,12 +223,20 @@ export function Dock(): JSX.Element {
       )
   ]
 
+  const setDockElevated = useStore((s) => s.setDockElevated)
+
   return (
     // z-[1000]: окна получают z-index из windowSeq (обычные маленькие числа) —
     // без явного большого значения развёрнутое окно перекрыло бы док и
     // визуально, и по кликам (Desktop не изолирует стекинг-контекст).
+    // WebContentsView всё равно выше DOM — полосу дока клипает useViewBounds;
+    // на hover поднимаем клип (dockElevated), чтобы magnification не уходил под вебвью.
     <div className="no-drag pointer-events-none absolute inset-x-0 bottom-3 z-[1000] flex justify-center overflow-visible">
-      <div className="pointer-events-auto overflow-visible">
+      <div
+        className="pointer-events-auto overflow-visible"
+        onMouseEnter={() => setDockElevated(true)}
+        onMouseLeave={() => setDockElevated(false)}
+      >
         {/* Запас по 16px с каждого края, чтобы док не упирался в стенки стола. */}
         <DockBar items={items} maxWidth={Math.max(240, deskWidth - 32)} />
       </div>

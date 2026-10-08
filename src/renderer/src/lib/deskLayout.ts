@@ -1,18 +1,23 @@
 /**
- * Полоса снизу, куда окна/WebContentsView не заезжают.
- * bottom-3 (12) + h-[4.75rem] дока (76) ≈ 88; +пара px воздуха.
- * Большой запас под magnification давал дыру обоев при maximize — не надо:
- * иконки на hover чуть могут зайти под вебвью, зато окно садится к доку.
+ * Полоса снизу под док в покое: bottom-3 (12) + h-[4.75rem] (76) ≈ 88.
+ * Свободные окна и клип WebContentsView — по этому значению.
+ * Maximize окно на весь стол (без дыры обоев); вебвью клипается отдельно.
  */
 export const DOCK_CLEARANCE = 90
 
-/** Геометрия развёрнутого окна — всегда с зазором под док. */
+/**
+ * При hover дока плитки растут вверх (peak ≈ 1.55× + lift + tooltip).
+ * На это время вебвью поднимаем выше, иначе нативный слой кроет иконки.
+ */
+export const DOCK_MAG_CLEARANCE = 156
+
+/** Геометрия развёрнутого окна — на весь стол; зазор под док только у вебвью. */
 export function maximizedRect(desktop: { width: number; height: number }): DeskRect {
   return {
     x: 0,
     y: 0,
     width: desktop.width,
-    height: Math.max(MIN_WIN_HEIGHT, desktop.height - DOCK_CLEARANCE)
+    height: Math.max(MIN_WIN_HEIGHT, desktop.height)
   }
 }
 

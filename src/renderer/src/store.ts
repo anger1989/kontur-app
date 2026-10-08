@@ -30,6 +30,7 @@ export type AppPage =
   | 'search'
   | 'settings'
   | 'terminal'
+  | 'assistant'
 
 export type Route =
   | { kind: 'page'; page: AppPage; itemId?: string }
@@ -70,7 +71,8 @@ export const PAGE_TITLES: Record<AppPage, string> = {
   bookmarks: 'Закладки',
   browser: 'Браузер',
   settings: 'Настройки',
-  terminal: 'Терминал'
+  terminal: 'Терминал',
+  assistant: 'Ассистент'
 }
 
 interface State {
@@ -101,12 +103,32 @@ interface State {
   /** Текущий размер рабочего стола — от него считаются виджеты и док. */
   desktop: { width: number; height: number }
   /**
+   * Курсор над доком — плитки растут вверх. Вебвью поднимает нижний клип
+   * (см. DOCK_MAG_CLEARANCE), иначе нативный слой кроет magnification.
+   */
+  dockElevated: boolean
+  /**
+   * Счётчик перезапуска PTY ассистента — общий для виджета и окна
+   * (LiveTerminal смотрит на него как на restartToken).
+   */
+  assistantRestartSeq: number
+  /** Открытая модалка настройки контура (шапка / Настройки → Контуры). */
+  envEditorId: string | null
+  /** Модалка подсказок горячих клавиш. */
+  hotkeysOpen: boolean
+  /**
    * Переключатель окон (Ctrl+` / Ctrl+⇧`): лента миниатюр, пока не отпустят
    * модификатор.
    */
   windowSwitcher: { ids: string[]; index: number } | null
 
   load: () => Promise<void>
+  setDockElevated: (elevated: boolean) => void
+  /** Убить и заново поднять Cursor Agent (виджет / окно). */
+  restartAssistant: () => void
+  openEnvEditor: (envId: string) => void
+  closeEnvEditor: () => void
+  setHotkeysOpen: (open: boolean) => void
   /**
    * Стол изменил размер (окно приложения растянули или сжали): запомнить и
    * вписать окна в новые границы.
@@ -197,7 +219,8 @@ const PAGES = new Set<AppPage>([
   'browser',
   'search',
   'settings',
-  'terminal'
+  'terminal',
+  'assistant'
 ])
 
 /**
@@ -597,7 +620,27 @@ export const useStore = create<State>((set, get) => ({
   arranged: false,
   arrangeKind: null,
   desktop: { width: 1024, height: 700 },
+  dockElevated: false,
+  assistantRestartSeq: 0,
+  envEditorId: null,
+  hotkeysOpen: false,
   windowSwitcher: null,
+
+  setDockElevated: (elevated) => {
+    if (get().dockElevated === elevated) return
+    set({ dockElevated: elevated })
+    // Хосты вебвью подписаны на dockElevated; тик — на случай, если effect
+    // ещё не успел, а кадр magnification уже рисуется.
+    window.dispatchEvent(new Event('kontur:view-bounds-tick'))
+  },
+
+  restartAssistant: () => {
+    set({ assistantRestartSeq: get().assistantRestartSeq + 1 })
+  },
+
+  openEnvEditor: (envId) => set({ envEditorId: envId }),
+  closeEnvEditor: () => set({ envEditorId: null }),
+  setHotkeysOpen: (open) => set({ hotkeysOpen: open }),
 
   setDesktopSize: (size) => {
     const width = Math.round(size.width)
@@ -890,7 +933,7 @@ export const useStore = create<State>((set, get) => ({
           const r = w.restoreRect ?? { x: w.x, y: w.y, width: w.width, height: w.height }
           return { ...w, ...r, maximized: false, restoreRect: undefined }
         }
-        // Всегда с зазором под док — иначе WebContentsView накроет magnification.
+        // На весь стол; полосу дока вырезает useViewBounds у вебвью.
         return {
           ...w,
           maximized: true,

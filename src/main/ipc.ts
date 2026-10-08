@@ -547,7 +547,16 @@ export function registerIpc(getWin: () => BrowserWindow | null, views: () => Ser
 
   ipcMain.handle(
     CH.terminalCreate,
-    (_e, opts?: { cols?: number; rows?: number; cwd?: string }) => createPtySession(getWin, opts ?? {})
+    (
+      _e,
+      opts?: {
+        cols?: number
+        rows?: number
+        cwd?: string
+        key?: string
+        profile?: 'shell' | 'agent'
+      }
+    ) => createPtySession(getWin, opts ?? {})
   )
   ipcMain.handle(CH.terminalWrite, (_e, id: string, data: string) => {
     writePty(id, data)
