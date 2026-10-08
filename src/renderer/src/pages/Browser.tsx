@@ -393,7 +393,7 @@ export function Browser({
           type="button"
           size="icon-xs"
           variant="ghost"
-          title="DevTools — отдельное окно (повторный клик или ⌥⌘I закрывает)"
+          title="DevTools — отдельное окно · ⌥⌘I закрыть"
           disabled={!activeId}
           onClick={() => activeId && void window.kontur.browser.devTools(activeId)}
         >

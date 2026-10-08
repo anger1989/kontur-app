@@ -1,4 +1,5 @@
 import {
+  BrowserWindow,
   WebContentsView,
   desktopCapturer,
   session,
@@ -129,19 +130,58 @@ export class ServiceViewManager {
   onExternalLink: ((sourceServiceId: string, url: string) => void) | null = null
   /** ⌘` / ⌘⇧` из вебвью — рендерер листает окна стола. */
   onCycleWindow: ((dir: 1 | -1) => void) | null = null
+  /** Отпустили ⌘/Ctrl в вебвью — подтвердить switcher окон. */
+  onConfirmCycleWindow: (() => void) | null = null
+
+  /**
+   * Свои BrowserWindow под DevTools (по id вкладки/сервиса).
+   * Без этого WebContentsView открывает docked DevTools на всю площадь view —
+   * закрыть почти нельзя, ⌥⌘I не доходит.
+   */
+  private devToolsWins = new Map<string, BrowserWindow>()
 
   constructor(private win: BaseWindow) {}
 
   /** Горячие клавиши стола, пока фокус внутри WebContentsView. */
   private attachDeskHotkeys(wc: WebContents): void {
     wc.on('before-input-event', (event, input) => {
+      // Отпустили модификатор — подтвердить ленту окон (как Cmd+Tab).
+      if (input.type === 'keyUp') {
+        if (
+          input.key === 'Meta' ||
+          input.key === 'Control' ||
+          input.code === 'MetaLeft' ||
+          input.code === 'MetaRight' ||
+          input.code === 'ControlLeft' ||
+          input.code === 'ControlRight'
+        ) {
+          this.onConfirmCycleWindow?.()
+        }
+        return
+      }
       if (input.type !== 'keyDown') return
       const mod = process.platform === 'darwin' ? input.meta : input.control
       if (!mod) return
-      // Backquote — физическая клавиша `/~; на русской раскладке key может быть «ё».
-      if (input.code !== 'Backquote' && input.key !== '`') return
+      // Backquote — физическая `/~; на русской раскладке key часто «ё».
+      if (input.code !== 'Backquote' && input.key !== '`' && input.key !== 'ё') return
       event.preventDefault()
       this.onCycleWindow?.(input.shift ? -1 : 1)
+    })
+  }
+
+  /** ⌥⌘I / Ctrl+Shift+I — toggle DevTools. Esc не трогаем: в DT это drawer консоли. */
+  private attachDevToolsHotkeys(wc: WebContents, viewId: string): void {
+    wc.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return
+      const mod = process.platform === 'darwin' ? input.meta : input.control
+      if (
+        mod &&
+        (input.alt || input.shift) &&
+        (input.key.toLowerCase() === 'i' || input.code === 'KeyI')
+      ) {
+        event.preventDefault()
+        setTimeout(() => this.openDevTools(viewId), 0)
+      }
     })
   }
 
@@ -340,6 +380,7 @@ export class ServiceViewManager {
     const wc = view.webContents
     this.attachNavGuards(wc, service.id)
     this.attachDeskHotkeys(wc)
+    this.attachDevToolsHotkeys(wc, service.id)
 
     wc.on('certificate-error', (event, _url, error, _cert, callback) => {
       if (env.caCertPath || env.allowInsecureTls) {
@@ -713,24 +754,107 @@ export class ServiceViewManager {
   }
 
   /**
-   * DevTools только отдельным окном. У WebContentsView docked-режим забирает
-   * всю площадь вкладки, и закрыть его из UI почти нельзя — поэтому toggle
-   * и никогда не right/bottom.
+   * DevTools в своём BrowserWindow (setDevToolsWebContents).
+   * Обычный openDevTools({detach}) у WebContentsView всё равно часто
+   * залипает docked на всю вкладку — без крестика и без горячих клавиш.
    */
   openDevTools(serviceId: string): void {
     const wc = this.views.get(serviceId)?.webContents
     if (!wc || wc.isDestroyed()) return
     if (wc.isDevToolsOpened()) {
-      wc.closeDevTools()
+      this.closeDevToolsIfOpen(serviceId)
       return
     }
+
+    let dtWin = this.devToolsWins.get(serviceId)
+    if (!dtWin || dtWin.isDestroyed()) {
+      const parent = this.win.getBounds()
+      const width = Math.min(1000, Math.max(640, Math.round(parent.width * 0.72)))
+      const height = Math.min(740, Math.max(480, Math.round(parent.height * 0.78)))
+      dtWin = new BrowserWindow({
+        width,
+        height,
+        x: Math.round(parent.x + (parent.width - width) / 2),
+        y: Math.round(parent.y + (parent.height - height) / 2),
+        title: 'Kontur DevTools',
+        autoHideMenuBar: true,
+        minimizable: true,
+        maximizable: true,
+        fullscreenable: false,
+        show: false,
+        webPreferences: {
+          contextIsolation: false,
+          nodeIntegration: true,
+          sandbox: false
+        }
+      })
+      dtWin.setMenuBarVisibility(false)
+      dtWin.on('closed', () => {
+        this.devToolsWins.delete(serviceId)
+        if (!wc.isDestroyed() && wc.isDevToolsOpened()) {
+          try {
+            wc.closeDevTools()
+          } catch {
+            /* ignore */
+          }
+        }
+      })
+      // Фокус в DevTools: только ⌥⌘I / Ctrl+Shift+I. Esc — drawer консоли Chromium.
+      dtWin.webContents.on('before-input-event', (event, input) => {
+        if (input.type !== 'keyDown') return
+        const mod = process.platform === 'darwin' ? input.meta : input.control
+        if (
+          mod &&
+          (input.alt || input.shift) &&
+          (input.key.toLowerCase() === 'i' || input.code === 'KeyI')
+        ) {
+          event.preventDefault()
+          this.closeDevToolsIfOpen(serviceId)
+        }
+      })
+      this.devToolsWins.set(serviceId, dtWin)
+    }
+
+    try {
+      wc.setDevToolsWebContents(dtWin.webContents)
+    } catch {
+      // Уже привязан к этому webContents — ок.
+    }
     wc.openDevTools({ mode: 'detach', activate: true })
+    if (dtWin.isFullScreen()) dtWin.setFullScreen(false)
+    if (dtWin.isMaximized()) dtWin.unmaximize()
+    dtWin.show()
+    dtWin.focus()
   }
 
   private closeDevToolsIfOpen(id: string): void {
     const wc = this.views.get(id)?.webContents
-    if (!wc || wc.isDestroyed()) return
-    if (wc.isDevToolsOpened()) wc.closeDevTools()
+    if (wc && !wc.isDestroyed() && wc.isDevToolsOpened()) {
+      try {
+        wc.closeDevTools()
+      } catch {
+        /* ignore */
+      }
+    }
+    const dtWin = this.devToolsWins.get(id)
+    this.devToolsWins.delete(id)
+    if (dtWin && !dtWin.isDestroyed()) {
+      dtWin.destroy()
+    }
+  }
+
+  /** Закрыть любой открытый DevTools (rescue с хрома / ⌥⌘I). */
+  closeAnyDevTools(): boolean {
+    let closed = false
+    for (const id of this.views.keys()) {
+      const wc = this.views.get(id)?.webContents
+      const winOpen = this.devToolsWins.has(id)
+      if ((wc && !wc.isDestroyed() && wc.isDevToolsOpened()) || winOpen) {
+        this.closeDevToolsIfOpen(id)
+        closed = true
+      }
+    }
+    return closed
   }
 
   async clearEnvSession(envId: string): Promise<void> {
@@ -910,6 +1034,7 @@ export class ServiceViewManager {
     const wc = view.webContents
     this.attachNavGuards(wc, tab.id)
     this.attachDeskHotkeys(wc)
+    this.attachDevToolsHotkeys(wc, tab.id)
 
     // Своих окон у вебвью быть не должно: target=_blank и window.open
     // становятся новой вкладкой рядом с этой — как в любом браузере.
@@ -935,24 +1060,11 @@ export class ServiceViewManager {
     wc.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return
       const mod = process.platform === 'darwin' ? input.meta : input.control
+      if (input.alt || !mod) return
       const act = (fn: () => void): void => {
         event.preventDefault()
         setTimeout(fn, 0)
       }
-      // Esc / ⌥⌘I / Ctrl+Shift+I — закрыть залипший DevTools.
-      if (input.key === 'Escape' && wc.isDevToolsOpened()) {
-        act(() => this.closeDevToolsIfOpen(tab.id))
-        return
-      }
-      if (
-        mod &&
-        (input.key.toLowerCase() === 'i' || input.code === 'KeyI') &&
-        (input.alt || input.shift)
-      ) {
-        act(() => this.openDevTools(tab.id))
-        return
-      }
-      if (input.alt || !mod) return
       switch (input.key.toLowerCase()) {
         case 't':
           act(() => this.newTab({ envId: tab.envId, afterId: tab.id }))

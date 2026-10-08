@@ -50,7 +50,7 @@ export function Desktop(): JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.metaKey || e.ctrlKey
-      if (mod && (e.code === 'Backquote' || e.key === '`')) {
+      if (mod && (e.code === 'Backquote' || e.key === '`' || e.key === 'ё')) {
         if (e.defaultPrevented) return
         // Switcher сам использует popoverDepth — не блокируем повторные ⌘`.
         if (!useStore.getState().windowSwitcher && isPopoverOpen()) return
@@ -77,15 +77,41 @@ export function Desktop(): JSX.Element {
         .sort((a, b) => b.z - a.z)[0]
       if (top) closeWindow(top.id)
     }
+    // Keyup Meta всегда слушает Desktop — иначе после ⌘` listener WindowSwitcher
+    // ещё не смонтирован и подтверждение теряется.
+    const onKeyUp = (e: KeyboardEvent): void => {
+      if (!useStore.getState().windowSwitcher) return
+      if (
+        e.key === 'Meta' ||
+        e.key === 'Control' ||
+        e.code === 'MetaLeft' ||
+        e.code === 'MetaRight' ||
+        e.code === 'ControlLeft' ||
+        e.code === 'ControlRight'
+      ) {
+        useStore.getState().confirmWindowSwitcher()
+      }
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKeyUp, true)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKeyUp, true)
+    }
   }, [closeWindow, peekDesktop, size, cycleWindow])
 
-  // Фокус в вебвью — keydown до рендерера не доходит; main шлёт IPC.
+  // Фокус в вебвью — keydown/keyup до рендерера не доходят; main шлёт IPC.
   useEffect(() => {
-    return window.kontur.nav.onCycleWindow((dir) => {
+    const offCycle = window.kontur.nav.onCycleWindow((dir) => {
       useStore.getState().cycleWindow(dir)
     })
+    const offConfirm = window.kontur.nav.onConfirmCycleWindow(() => {
+      useStore.getState().confirmWindowSwitcher()
+    })
+    return () => {
+      offCycle()
+      offConfirm()
+    }
   }, [])
 
   const toggleShowDesktop = (): void => {

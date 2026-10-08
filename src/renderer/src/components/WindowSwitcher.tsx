@@ -91,7 +91,7 @@ export function WindowSwitcher(): JSX.Element | null {
     }, SETTLE_MS)
   }
 
-  // Открытие/закрытие: снимки → спрятать вебвью → settle.
+  // Сразу спрятать вебвью + settle (не ждать capture — иначе ⌘` «висит»).
   useEffect(() => {
     if (!switcher) {
       if (openRef.current) {
@@ -105,6 +105,12 @@ export function WindowSwitcher(): JSX.Element | null {
       setThumbs({})
       return
     }
+
+    if (!openRef.current) {
+      openRef.current = true
+      notifyPopoverOpenChange(true)
+    }
+    bumpSettle()
 
     let cancelled = false
     const ids = switcher.ids
@@ -124,17 +130,11 @@ export function WindowSwitcher(): JSX.Element | null {
             next[winId] = null
             return
           }
-          // Только capture — freeze прячет view; оверлей сам скроет все через popover.
           next[winId] = await window.kontur.view.capture(viewId)
         })
       )
       if (cancelled) return
       setThumbs(next)
-      if (!openRef.current) {
-        openRef.current = true
-        notifyPopoverOpenChange(true)
-      }
-      bumpSettle()
     })()
 
     return () => {
@@ -151,15 +151,10 @@ export function WindowSwitcher(): JSX.Element | null {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [switcher?.index])
 
-  // Keyup модификатора / Esc; повторный ⌘` уже в Desktop → cycleWindow.
+  // Esc / Enter / стрелки. Keyup ⌘ — в Desktop (всегда смонтирован).
   useEffect(() => {
     if (!switcher) return
 
-    const onKeyUp = (e: KeyboardEvent): void => {
-      if (e.key === 'Meta' || e.key === 'Control' || e.code === 'MetaLeft' || e.code === 'MetaRight') {
-        confirm()
-      }
-    }
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         e.preventDefault()
@@ -172,7 +167,6 @@ export function WindowSwitcher(): JSX.Element | null {
         confirm()
         return
       }
-      // Стрелки тоже листают, когда лента открыта.
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
         e.preventDefault()
         cycle(1)
@@ -184,12 +178,8 @@ export function WindowSwitcher(): JSX.Element | null {
       }
     }
 
-    window.addEventListener('keyup', onKeyUp, true)
     window.addEventListener('keydown', onKeyDown, true)
-    return () => {
-      window.removeEventListener('keyup', onKeyUp, true)
-      window.removeEventListener('keydown', onKeyDown, true)
-    }
+    return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [switcher, confirm, cancel, cycle])
 
   // Unmount safety.
@@ -265,7 +255,7 @@ export function WindowSwitcher(): JSX.Element | null {
               {activeTitle}
             </p>
             <p className="mt-1 text-center text-[11px] text-white/45">
-              ⌘` · Esc отмена · отпустите ⌘ чтобы выбрать
+              ⌘` / ⌘⇧` · стрелки · отпустите ⌘ · Esc отмена
             </p>
           </motion.div>
         </motion.div>

@@ -79,6 +79,7 @@ function createWindow(): void {
   views.onLoadingChange = (id, loading) =>
     win?.webContents.send(CH.viewLoadingChanged, { id, loading })
   views.onCycleWindow = (dir) => win?.webContents.send(CH.deskCycleWindow, dir)
+  views.onConfirmCycleWindow = () => win?.webContents.send(CH.deskConfirmCycleWindow)
 
   win.on('ready-to-show', () => win?.show())
   // Закрытие окна прячет приложение в трей, а не выгружает его: уведомления и
@@ -104,6 +105,18 @@ function createWindow(): void {
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  // Фокус в хроме — ⌥⌘I / Ctrl+Shift+I гасят DevTools. Esc не трогаем.
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return
+    const mod = process.platform === 'darwin' ? input.meta : input.control
+    const isDt =
+      mod &&
+      (input.alt || input.shift) &&
+      (input.key.toLowerCase() === 'i' || input.code === 'KeyI')
+    if (!isDt) return
+    if (views?.closeAnyDevTools()) event.preventDefault()
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

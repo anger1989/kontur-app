@@ -280,9 +280,9 @@ function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: nu
               ))}
           </div>
 
-          {/* AnimatedList: spring при появлении/уходе; скролл — снаружи. */}
-          <div className="overflow-y-auto pr-0.5" style={{ maxHeight: listHeight ?? 288 }}>
-            <AnimatedList className="gap-1.5">
+          {/* AnimatedList: spring при появлении/уходе; только вертикальный скролл. */}
+          <div className="overflow-x-hidden overflow-y-auto pr-0.5" style={{ maxHeight: listHeight ?? 288 }}>
+            <AnimatedList className="min-w-0 gap-1.5">
               {shown.map(({ it }) => {
                 const Icon = KIND_ICON[it.kind] ?? FileText
                 const accent = config?.envs.find((e) => e.id === it.envId)?.accent
@@ -294,8 +294,8 @@ function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: nu
                     type="button"
                     onClick={() => openItem(it)}
                     className={cn(
-                      'relative flex w-full items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left',
-                      'transition-[transform,background-color] duration-200 ease-out hover:scale-[1.02]',
+                      'relative flex w-full max-w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left',
+                      'transition-colors duration-200 ease-out',
                       'bg-foreground/[0.03] hover:bg-foreground/[0.06]',
                       'dark:bg-white/[0.04] dark:hover:bg-white/[0.07]',
                       'dark:[box-shadow:0_-12px_40px_-16px_#ffffff14_inset] dark:backdrop-blur-md',

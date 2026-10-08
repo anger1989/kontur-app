@@ -377,6 +377,14 @@ const api = {
       return (): void => {
         ipcRenderer.off(CH.deskCycleWindow, h)
       }
+    },
+    /** Отпустили ⌘/Ctrl в вебвью — подтвердить выбор в switcher. */
+    onConfirmCycleWindow: (cb: () => void) => {
+      const h = (): void => cb()
+      ipcRenderer.on(CH.deskConfirmCycleWindow, h)
+      return (): void => {
+        ipcRenderer.off(CH.deskConfirmCycleWindow, h)
+      }
     }
   },
   icons: {

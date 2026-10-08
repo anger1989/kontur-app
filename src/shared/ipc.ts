@@ -129,6 +129,8 @@ export const CH = {
   joinMeeting: 'app:joinMeeting',
   /** Main → renderer: ⌘` / ⌘⇧` из вебвью — листать окна стола. */
   deskCycleWindow: 'desk:cycleWindow',
+  /** Main → renderer: отпустили ⌘/Ctrl в вебвью — подтвердить switcher. */
+  deskConfirmCycleWindow: 'desk:confirmCycleWindow',
   notifyTest: 'app:notifyTest',
   mcpInfo: 'mcp:info',
   mcpAgents: 'mcp:agents',

@@ -22,7 +22,7 @@ export function AnimatedListItem({
   }
 
   return (
-    <motion.div {...animations} layout className={cn('w-full', className)}>
+    <motion.div {...animations} layout className={cn('w-full min-w-0 max-w-full', className)}>
       {children}
     </motion.div>
   )
