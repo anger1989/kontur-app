@@ -145,7 +145,7 @@ export class ServiceViewManager {
   /** Горячие клавиши стола, пока фокус внутри WebContentsView. */
   private attachDeskHotkeys(wc: WebContents): void {
     wc.on('before-input-event', (event, input) => {
-      // Отпустили модификатор — подтвердить ленту окон (как Cmd+Tab).
+      // Отпустили Ctrl/⌘ — подтвердить ленту (как Cmd+Tab). Без таймера.
       if (input.type === 'keyUp') {
         if (
           input.key === 'Meta' ||
@@ -160,7 +160,8 @@ export class ServiceViewManager {
         return
       }
       if (input.type !== 'keyDown') return
-      const mod = process.platform === 'darwin' ? input.meta : input.control
+      // Ctrl+` — основной хоткей: ⌘` на macOS забирает система (окна одного app).
+      const mod = input.control || input.meta
       if (!mod) return
       // Backquote — физическая `/~; на русской раскладке key часто «ё».
       if (input.code !== 'Backquote' && input.key !== '`' && input.key !== 'ё') return

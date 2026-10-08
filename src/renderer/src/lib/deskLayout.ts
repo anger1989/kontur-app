@@ -1,7 +1,20 @@
-// Реальный футпринт дока: bottom-3 (12px) + h-16 (64px) = 76px. Было 96 —
-// лишние 20px пустого места над доком у вебвью-окон при maximize/drag.
-/** Полоса под floating dock (h-16 + bottom-3 + небольшой запас). */
-export const DOCK_CLEARANCE = 84
+/**
+ * Полоса снизу, куда окна/WebContentsView не заезжают.
+ * bottom-3 (12) + h-[4.75rem] дока (76) + запас под magnification/tooltip (~24):
+ * иначе при hover плитки растут вверх и уходят ПОД нативный вебвью
+ * (DOM-док никогда не выше WebContentsView).
+ */
+export const DOCK_CLEARANCE = 112
+
+/** Геометрия развёрнутого окна — всегда с зазором под док. */
+export function maximizedRect(desktop: { width: number; height: number }): DeskRect {
+  return {
+    x: 0,
+    y: 0,
+    width: desktop.width,
+    height: Math.max(MIN_WIN_HEIGHT, desktop.height - DOCK_CLEARANCE)
+  }
+}
 
 /** Сколько пикселей окна остаётся видно с края в режиме «показать стол». */
 export const DESKTOP_PEEK = 36

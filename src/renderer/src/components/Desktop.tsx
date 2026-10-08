@@ -46,13 +46,12 @@ export function Desktop(): JSX.Element {
   const cycleWindow = useStore((s) => s.cycleWindow)
 
   // Esc: switcher → вернуть окна со стола → закрыть верхнее.
-  // ⌘` / ⌘⇧` — лента миниатюр (подтверждение на keyup ⌘ / settle).
+  // Ctrl+` / Ctrl+⇧` — лента (⌘` на macOS часто съедает система). Выбор — на keyup Ctrl/⌘.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      const mod = e.metaKey || e.ctrlKey
+      const mod = e.ctrlKey || e.metaKey
       if (mod && (e.code === 'Backquote' || e.key === '`' || e.key === 'ё')) {
         if (e.defaultPrevented) return
-        // Switcher сам использует popoverDepth — не блокируем повторные ⌘`.
         if (!useStore.getState().windowSwitcher && isPopoverOpen()) return
         if (document.querySelector('[data-slot="dialog-content"]')) return
         e.preventDefault()
@@ -77,8 +76,8 @@ export function Desktop(): JSX.Element {
         .sort((a, b) => b.z - a.z)[0]
       if (top) closeWindow(top.id)
     }
-    // Keyup Meta всегда слушает Desktop — иначе после ⌘` listener WindowSwitcher
-    // ещё не смонтирован и подтверждение теряется.
+    // Keyup модификатора — единственный способ подтвердить (не таймер).
+    // Слушаем на Desktop: WindowSwitcher может ещё не быть смонтирован в том же жесте.
     const onKeyUp = (e: KeyboardEvent): void => {
       if (!useStore.getState().windowSwitcher) return
       if (

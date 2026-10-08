@@ -9,7 +9,13 @@ import type {
   ServiceConfig,
   ThemePref
 } from '@shared/types'
-import { DOCK_CLEARANCE, fitRect, isOccludedByHigher, peekRects } from '@/lib/deskLayout'
+import {
+  DOCK_CLEARANCE,
+  fitRect,
+  isOccludedByHigher,
+  maximizedRect,
+  peekRects
+} from '@/lib/deskLayout'
 
 export type AppPage =
   | 'today'
@@ -87,11 +93,16 @@ interface State {
   browser: BrowserState
   /** Окна уведены с стола (плитка Exposé или peek «показать стол»). */
   arranged: boolean
+  /**
+   * Режим компоновки: `tile` — можно работать в окнах; `peek` — клик возвращает
+   * геометрию; `null` — обычный стол.
+   */
+  arrangeKind: 'tile' | 'peek' | null
   /** Текущий размер рабочего стола — от него считаются виджеты и док. */
   desktop: { width: number; height: number }
   /**
-   * Переключатель окон (⌘` / ⌘⇧`): лента миниатюр, пока не отпустят модификатор
-   * или не сработает settle-таймер.
+   * Переключатель окон (Ctrl+` / Ctrl+⇧`): лента миниатюр, пока не отпустят
+   * модификатор.
    */
   windowSwitcher: { ids: string[]; index: number } | null
 
@@ -117,8 +128,8 @@ interface State {
   /** Поднять окно наверх (и снять минимизацию, если была). */
   focusWindow: (id: string) => void
   /**
-   * Листать открытые окна стола (⌘` / ⌘⇧`) — открывает/двигает switcher
-   * с миниатюрами; подтверждение — отдельно (keyup / таймер / клик).
+   * Листать открытые окна стола (Ctrl+` / Ctrl+⇧`) — открывает/двигает switcher;
+   * подтверждение — keyup модификатора / Enter / клик.
    */
   cycleWindow: (dir: 1 | -1) => void
   /** Применить выбор в switcher и закрыть ленту. */
@@ -245,6 +256,11 @@ interface ArrangeSnapshot {
 }
 /** Не в сторе: это техническое состояние одной кнопки, реактивность ему не нужна. */
 let arrangeSnapshot: ArrangeSnapshot[] | null = null
+/**
+ * `tile` — кнопка «Разложить»: работаем в плитке, клик по окну не откатывает.
+ * `peek` — «показать стол»: клик выбирает окно и возвращает геометрию (как macOS).
+ */
+let arrangeKind: 'tile' | 'peek' | null = null
 
 /** Сессия окон рабочего стола — переживает перезапуск приложения. */
 const SESSION_WINDOWS_KEY = 'kontur.desk.windows.v1'
@@ -347,13 +363,14 @@ function restoreSessionWindows(
     )
     const maximized = Boolean(s.maximized)
     const z = Number.isFinite(s.z) ? s.z : windows.length + 1
+    const maxR = maximizedRect(desk)
     windows.push({
       id: `${routeKey(route)}:restored`,
       route,
-      x: maximized ? 0 : base.x,
-      y: maximized ? 0 : base.y,
-      width: maximized ? desk.width : base.width,
-      height: maximized ? desk.height : base.height,
+      x: maximized ? maxR.x : base.x,
+      y: maximized ? maxR.y : base.y,
+      width: maximized ? maxR.width : base.width,
+      height: maximized ? maxR.height : base.height,
       z,
       minimized: Boolean(s.minimized),
       maximized,
@@ -390,7 +407,7 @@ function tileRects(
   })
 }
 
-/** Вернуть геометрию из снимка перед Exposé. */
+/** Вернуть геометрию из снимка перед Exposé / плиткой. */
 function restoreFromArrange(
   set: (partial: Partial<State> | ((s: State) => Partial<State>)) => void,
   get: () => State
@@ -398,14 +415,26 @@ function restoreFromArrange(
   if (!arrangeSnapshot) return false
   const snap = arrangeSnapshot
   arrangeSnapshot = null
+  arrangeKind = null
   set({
     windows: get().windows.map((w) => {
       const s = snap.find((x) => x.id === w.id)
       return s ? { ...w, x: s.x, y: s.y, width: s.width, height: s.height, maximized: s.maximized } : w
     }),
-    arranged: false
+    arranged: false,
+    arrangeKind: null
   })
   return true
+}
+
+/** Закрепить текущую плитку как обычную геометрию (без отката к снимку). */
+function commitArrangeLayout(
+  set: (partial: Partial<State> | ((s: State) => Partial<State>)) => void
+): void {
+  if (arrangeKind !== 'tile') return
+  arrangeSnapshot = null
+  arrangeKind = null
+  set({ arranged: false, arrangeKind: null })
 }
 
 /**
@@ -434,6 +463,11 @@ function liveViewIds(get: () => State): string[] {
 
 /** Сколько попапов/модалок сейчас открыто поверх стола (см. notifyPopoverOpenChange). */
 let popoverDepth = 0
+/**
+ * Лента ⌘` прячет вебвью отдельно от popoverDepth: иначе StrictMode / гонка
+ * keyup Meta ломала счётчик → вебвью навсегда hide, ⌘`/Esc «мертвые».
+ */
+let switcherHidesViews = false
 /** reconcile на следующий кадр — при драге DOM поверх вебвью прячем view без лагов React. */
 let reconcileRaf = 0
 
@@ -448,6 +482,21 @@ function scheduleReconcile(get: () => State): void {
 /** Есть ли сейчас поверх стола Dialog/Select/Popover (вебвью должны быть спрятаны). */
 export function isPopoverOpen(): boolean {
   return popoverDepth > 0
+}
+
+function viewsBlocked(): boolean {
+  return popoverDepth > 0 || switcherHidesViews
+}
+
+/** Идемпотентно спрятать/вернуть вебвью на время window switcher. */
+export function setSwitcherViewsHidden(hidden: boolean): void {
+  if (hidden === switcherHidesViews) return
+  switcherHidesViews = hidden
+  if (hidden) {
+    void window.kontur.view.hide()
+    return
+  }
+  if (popoverDepth === 0) reconcileActiveService(() => useStore.getState())
 }
 
 /**
@@ -471,10 +520,9 @@ function reconcileActiveService(get: () => State): void {
     useStore.setState({ activeServiceId: nextViewId })
   }
 
-  // Пока открыта модалка/селект, нативные слои обязаны быть спрятаны — иначе они
-  // рисуются поверх неё. Переход (route.url) не теряем: он применится, когда
-  // попап закроется и notifyPopoverOpenChange вызовет reconcile снова.
-  if (popoverDepth > 0) return
+  // Пока открыта модалка/селект/switcher — нативные слои спрятаны.
+  // Переход (route.url) применится, когда блок снимется и reconcile вызовут снова.
+  if (viewsBlocked()) return
 
   const live = liveViewIds(get)
   const liveSet = new Set(live)
@@ -509,7 +557,7 @@ function reconcileActiveService(get: () => State): void {
  * открыт попап, не показываем: reconcile вернёт его сам после закрытия.
  */
 export function showServiceView(serviceId: string): void {
-  if (popoverDepth > 0) return
+  if (viewsBlocked()) return
   void window.kontur.view.show(serviceId)
 }
 
@@ -547,6 +595,7 @@ export const useStore = create<State>((set, get) => ({
   activeServiceId: null,
   browser: { tabs: [], activeId: null },
   arranged: false,
+  arrangeKind: null,
   desktop: { width: 1024, height: 700 },
   windowSwitcher: null,
 
@@ -569,9 +618,17 @@ export const useStore = create<State>((set, get) => ({
     const windows = get().windows.map((w) => {
       if (w.minimized) return w
       if (w.maximized) {
-        if (w.x === 0 && w.y === 0 && w.width === width && w.height === height) return w
+        const maxR = maximizedRect({ width, height })
+        if (
+          w.x === maxR.x &&
+          w.y === maxR.y &&
+          w.width === maxR.width &&
+          w.height === maxR.height
+        ) {
+          return w
+        }
         moved = true
-        return { ...w, x: 0, y: 0, width, height }
+        return { ...w, ...maxR }
       }
       const fit = fitRect(w, { width, height })
       if (fit.x === w.x && fit.y === w.y && fit.width === w.width && fit.height === w.height) {
@@ -601,6 +658,7 @@ export const useStore = create<State>((set, get) => ({
       height: w.height,
       maximized: w.maximized
     }))
+    arrangeKind = 'tile'
     // Стабильный порядок по z — как в Mission Control: нижние слева, верхние справа.
     const ordered = [...open].sort((a, b) => a.z - b.z)
     const rects = tileRects(ordered.length, desktopSize)
@@ -610,8 +668,10 @@ export const useStore = create<State>((set, get) => ({
         if (i < 0) return w
         return { ...w, ...rects[i], maximized: false }
       }),
-      arranged: true
+      arranged: true,
+      arrangeKind: 'tile'
     })
+    reconcileActiveService(get)
   },
 
   peekDesktop: (desktopSize) => {
@@ -628,6 +688,7 @@ export const useStore = create<State>((set, get) => ({
       height: w.height,
       maximized: w.maximized
     }))
+    arrangeKind = 'peek'
     const ordered = [...open].sort((a, b) => a.z - b.z)
     const rects = peekRects(
       ordered.map((w) => ({ x: w.x, y: w.y, width: w.width, height: w.height })),
@@ -640,7 +701,8 @@ export const useStore = create<State>((set, get) => ({
         const r = rects[i]!
         return { ...w, x: r.x, y: r.y, width: r.width, height: r.height, maximized: false }
       }),
-      arranged: true
+      arranged: true,
+      arrangeKind: 'peek'
     })
   },
 
@@ -722,7 +784,12 @@ export const useStore = create<State>((set, get) => ({
     const left = get().windows.filter((w) => w.id !== id && !w.minimized)
     if (arrangeSnapshot && left.length === 0) {
       arrangeSnapshot = null
-      set({ windows: get().windows.filter((w) => w.id !== id), arranged: false })
+      arrangeKind = null
+      set({
+        windows: get().windows.filter((w) => w.id !== id),
+        arranged: false,
+        arrangeKind: null
+      })
     } else {
       set({ windows: get().windows.filter((w) => w.id !== id) })
     }
@@ -730,8 +797,9 @@ export const useStore = create<State>((set, get) => ({
   },
 
   focusWindow: (id) => {
-    // Клик по окну в Exposé — выбрать его и вернуть всех на места.
-    restoreFromArrange(set, get)
+    // Peek («показать стол»): клик выбирает окно и возвращает геометрию.
+    // Tile (кнопка компоновки): остаёмся в плитке — можно работать в окне.
+    if (arrangeKind === 'peek') restoreFromArrange(set, get)
     const z = get().windowSeq + 1
     const prev = get().windows.find((w) => w.id === id)
     const fromDock = Boolean(prev?.minimized)
@@ -747,7 +815,13 @@ export const useStore = create<State>((set, get) => ({
   cycleWindow: (dir) => {
     restoreFromArrange(set, get)
     const open = get().windows.filter((w) => !w.minimized)
-    if (open.length < 2) return
+    if (open.length < 2) {
+      if (get().windowSwitcher) {
+        set({ windowSwitcher: null })
+        setSwitcherViewsHidden(false)
+      }
+      return
+    }
 
     const sw = get().windowSwitcher
     if (sw) {
@@ -756,6 +830,7 @@ export const useStore = create<State>((set, get) => ({
       const ids = sw.ids.filter((id) => open.some((w) => w.id === id))
       if (ids.length < 2) {
         set({ windowSwitcher: null })
+        setSwitcherViewsHidden(false)
         return
       }
       const currentId = sw.ids[sw.index]
@@ -770,6 +845,7 @@ export const useStore = create<State>((set, get) => ({
     const ids = [...open].sort((a, b) => b.z - a.z).map((w) => w.id)
     const index = (dir + ids.length) % ids.length
     set({ windowSwitcher: { ids, index } })
+    setSwitcherViewsHidden(true)
   },
 
   confirmWindowSwitcher: () => {
@@ -777,12 +853,14 @@ export const useStore = create<State>((set, get) => ({
     if (!sw) return
     const id = sw.ids[sw.index]
     set({ windowSwitcher: null })
+    setSwitcherViewsHidden(false)
     if (id) get().focusWindow(id)
   },
 
   cancelWindowSwitcher: () => {
     if (!get().windowSwitcher) return
     set({ windowSwitcher: null })
+    setSwitcherViewsHidden(false)
   },
 
   minimizeWindow: (id) => {
@@ -812,14 +890,12 @@ export const useStore = create<State>((set, get) => ({
           const r = w.restoreRect ?? { x: w.x, y: w.y, width: w.width, height: w.height }
           return { ...w, ...r, maximized: false, restoreRect: undefined }
         }
+        // Всегда с зазором под док — иначе WebContentsView накроет magnification.
         return {
           ...w,
           maximized: true,
           restoreRect: { x: w.x, y: w.y, width: w.width, height: w.height },
-          x: 0,
-          y: 0,
-          width: desktopSize.width,
-          height: desktopSize.height
+          ...maximizedRect(desktopSize)
         }
       })
     })
@@ -839,9 +915,13 @@ export const useStore = create<State>((set, get) => ({
     ) {
       return
     }
+    // Драг/ресайз в плитке — закрепляем текущую раскладку (без отката к снимку).
+    if (arrangeKind === 'tile') commitArrangeLayout(set)
     // Меняем только одну ссылку — остальные окна не ре-рендерятся по селектору.
-    const copy = windows.slice()
-    copy[i] = next
+    const copy = get().windows.slice()
+    const j = copy.findIndex((w) => w.id === id)
+    if (j < 0) return
+    copy[j] = { ...copy[j]!, ...rect }
     set({ windows: copy })
     // DOM-окно поверх вебвью: WebContentsView всегда выше любого DOM —
     // прячем перекрытые view на этом же кадре, не ждя React/capturePage.

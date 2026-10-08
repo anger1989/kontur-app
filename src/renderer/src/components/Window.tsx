@@ -14,7 +14,7 @@ import {
 import { toast } from '@/components/ui/toast'
 import { nativeViewId, showServiceView, useStore, windowTitle, type DeskWindow } from '@/store'
 import { Button } from '@/components/ui/button'
-import { clampServiceRect, DOCK_CLEARANCE, isOccludedByHigher } from '@/lib/deskLayout'
+import { clampServiceRect, isOccludedByHigher, maximizedRect } from '@/lib/deskLayout'
 import { ServiceIcon } from './ServiceIcon'
 import { ServiceHost } from './ServiceHost'
 import { Today } from '@/pages/Today'
@@ -133,6 +133,9 @@ export function Window({
   const toggleMaximize = useStore((s) => s.toggleMaximize)
   const updateWindowRect = useStore((s) => s.updateWindowRect)
   const arranged = useStore((s) => s.arranged)
+  const arrangeKind = useStore((s) => s.arrangeKind)
+  /** Peek — клик выбирает окно; tile — обычная работа в плитке. */
+  const peekMode = arranged && arrangeKind === 'peek'
   const rectAtDragStart = useRef({ x: 0, y: 0, width: 0, height: 0 })
   const [snap, setSnap] = useState(false)
   const [genieOut, setGenieOut] = useState(false)
@@ -178,12 +181,7 @@ export function Window({
   // Хост держим смонтированным и при перекрытии: иначе unmount → hide → пустое
   // окно и мигание при возврате фокуса. Нативный view прячется, сверху freeze.
   const showServiceHost = isService && serviceReady && !genieOut
-  const maximizeSize = hostsView
-    ? {
-        width: desktopSize.width,
-        height: Math.max(MIN_HEIGHT, desktopSize.height - DOCK_CLEARANCE)
-      }
-    : desktopSize
+  const maximizeSize = maximizedRect(desktopSize)
 
   const dockX = Math.round(desktopSize.width / 2 - 24)
   const dockY = Math.round(desktopSize.height - 52)
@@ -191,8 +189,8 @@ export function Window({
   const onTitlePointerDown = (e: ReactPointerEvent): void => {
     if (e.button !== 0 || genieOut) return
     focusWindow(win.id)
-    // В Exposé клик выбирает окно (focus → restore); тащить плитку нельзя.
-    if (win.maximized || arranged) return
+    // Peek: клик выбирает окно; тащить нельзя. Tile — можно двигать.
+    if (win.maximized || peekMode) return
     setSnap(true)
     rectAtDragStart.current = { x: win.x, y: win.y, width: win.width, height: win.height }
     trackDrag(
@@ -219,7 +217,7 @@ export function Window({
     (e: ReactPointerEvent): void => {
       e.stopPropagation()
       e.preventDefault()
-      if (genieOut || arranged) return
+      if (genieOut || peekMode) return
       focusWindow(win.id)
       setSnap(true)
       rectAtDragStart.current = { x: win.x, y: win.y, width: win.width, height: win.height }
@@ -341,11 +339,11 @@ export function Window({
       <div
         className={cn(
           'no-drag relative flex h-9 shrink-0 items-center gap-2 border-b border-white/10 bg-muted/40 px-3',
-          arranged ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
+          peekMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
         )}
         onPointerDown={onTitlePointerDown}
         onDoubleClick={() => {
-          if (!arranged) runMaximize()
+          if (!peekMode) runMaximize()
         }}
       >
         {/* Как в macOS: глиф внутри кружка проявляется только при наведении на всю тройку. */}

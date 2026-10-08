@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
+import { useEffect, useMemo, useState, type JSX } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   Bookmark,
@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import {
   nativeViewId,
-  notifyPopoverOpenChange,
+  setSwitcherViewsHidden,
   useStore,
   windowTitle,
   type AppPage,
@@ -24,9 +24,6 @@ import {
 } from '@/store'
 import { HorizontalDepthFade } from '@/components/ui/horizontal-depth-fade'
 import { ServiceIcon } from './ServiceIcon'
-
-/** После последнего ⌘` — подтвердить, если модификатор уже отпущен (webview IPC). */
-const SETTLE_MS = 850
 
 const PAGE_ICON: Record<AppPage, LucideIcon> = {
   today: FileText,
@@ -54,8 +51,8 @@ function FallbackIcon({ win }: { win: DeskWindow }): JSX.Element {
 }
 
 /**
- * Cmd+`-подобный переключатель окон: горизонтальная лента миниатюр
- * (Horizontal Depth Fade). Нативные вебвью прячем на время оверлея.
+ * Переключатель окон (Ctrl+` / Ctrl+⇧`): лента миниатюр.
+ * Выбор — только на отпускание Ctrl/⌘ (см. Desktop + IPC из вебвью).
  */
 export function WindowSwitcher(): JSX.Element | null {
   const switcher = useStore((s) => s.windowSwitcher)
@@ -66,8 +63,6 @@ export function WindowSwitcher(): JSX.Element | null {
   const cycle = useStore((s) => s.cycleWindow)
 
   const [thumbs, setThumbs] = useState<Record<string, string | null>>({})
-  const settleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const openRef = useRef(false)
 
   const ordered = useMemo(() => {
     if (!switcher) return [] as DeskWindow[]
@@ -83,34 +78,12 @@ export function WindowSwitcher(): JSX.Element | null {
     return i >= 0 ? i : 0
   }, [switcher, ordered])
 
-  const bumpSettle = (): void => {
-    if (settleRef.current) clearTimeout(settleRef.current)
-    settleRef.current = setTimeout(() => {
-      settleRef.current = null
-      useStore.getState().confirmWindowSwitcher()
-    }, SETTLE_MS)
-  }
-
-  // Сразу спрятать вебвью + settle (не ждать capture — иначе ⌘` «висит»).
+  // Снимки. Hide/show вебвью — в store; подтверждение — keyup модификатора.
   useEffect(() => {
     if (!switcher) {
-      if (openRef.current) {
-        openRef.current = false
-        notifyPopoverOpenChange(false)
-      }
-      if (settleRef.current) {
-        clearTimeout(settleRef.current)
-        settleRef.current = null
-      }
       setThumbs({})
       return
     }
-
-    if (!openRef.current) {
-      openRef.current = true
-      notifyPopoverOpenChange(true)
-    }
-    bumpSettle()
 
     let cancelled = false
     const ids = switcher.ids
@@ -140,18 +113,9 @@ export function WindowSwitcher(): JSX.Element | null {
     return () => {
       cancelled = true
     }
-    // Только на смену «сессии» switcher (открытие / новый набор ids).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [switcher?.ids.join('|')])
 
-  // Каждый шаг по ленте — перезапуск settle.
-  useEffect(() => {
-    if (!switcher) return
-    bumpSettle()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [switcher?.index])
-
-  // Esc / Enter / стрелки. Keyup ⌘ — в Desktop (всегда смонтирован).
   useEffect(() => {
     if (!switcher) return
 
@@ -182,15 +146,9 @@ export function WindowSwitcher(): JSX.Element | null {
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [switcher, confirm, cancel, cycle])
 
-  // Unmount safety.
+  // Unmount / HMR — на всякий случай отпустить вебвью.
   useEffect(() => {
-    return () => {
-      if (openRef.current) {
-        openRef.current = false
-        notifyPopoverOpenChange(false)
-      }
-      if (settleRef.current) clearTimeout(settleRef.current)
-    }
+    return () => setSwitcherViewsHidden(false)
   }, [])
 
   const items = ordered.map((win) => ({
@@ -241,7 +199,6 @@ export function WindowSwitcher(): JSX.Element | null {
                     index: switcher.ids.indexOf(id)
                   }
                 })
-                // Клик по плитке — сразу выбрать.
                 queueMicrotask(() => useStore.getState().confirmWindowSwitcher())
               }}
               itemWidth={260}
@@ -255,7 +212,7 @@ export function WindowSwitcher(): JSX.Element | null {
               {activeTitle}
             </p>
             <p className="mt-1 text-center text-[11px] text-white/45">
-              ⌘` / ⌘⇧` · стрелки · отпустите ⌘ · Esc отмена
+              Ctrl+` / Ctrl+⇧` · стрелки · отпустите Ctrl · Esc отмена
             </p>
           </motion.div>
         </motion.div>
