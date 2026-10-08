@@ -127,8 +127,23 @@ export class ServiceViewManager {
    * (index.ts): сюда не затаскиваем ни конфиг сервисов, ни окно рендерера.
    */
   onExternalLink: ((sourceServiceId: string, url: string) => void) | null = null
+  /** ⌘` / ⌘⇧` из вебвью — рендерер листает окна стола. */
+  onCycleWindow: ((dir: 1 | -1) => void) | null = null
 
   constructor(private win: BaseWindow) {}
+
+  /** Горячие клавиши стола, пока фокус внутри WebContentsView. */
+  private attachDeskHotkeys(wc: WebContents): void {
+    wc.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return
+      const mod = process.platform === 'darwin' ? input.meta : input.control
+      if (!mod) return
+      // Backquote — физическая клавиша `/~; на русской раскладке key может быть «ё».
+      if (input.code !== 'Backquote' && input.key !== '`') return
+      event.preventDefault()
+      this.onCycleWindow?.(input.shift ? -1 : 1)
+    })
+  }
 
   private applyChrome(serviceId: string, view: WebContentsView): void {
     const c = this.chrome.get(serviceId) ?? (this.tabs.has(serviceId) ? this.browserChrome : null)
@@ -324,6 +339,7 @@ export class ServiceViewManager {
 
     const wc = view.webContents
     this.attachNavGuards(wc, service.id)
+    this.attachDeskHotkeys(wc)
 
     wc.on('certificate-error', (event, _url, error, _cert, callback) => {
       if (env.caCertPath || env.allowInsecureTls) {
@@ -534,6 +550,8 @@ export class ServiceViewManager {
     if (serviceId) {
       const view = this.views.get(serviceId)
       if (!view || !this.visible.has(serviceId)) return null
+      // Уходим со вкладки — гасим DevTools, иначе docked-оверлей «залипает».
+      this.closeDevToolsIfOpen(serviceId)
       view.setVisible(false)
       this.visible.delete(serviceId)
       this.cancelSnapshot(serviceId)
@@ -541,6 +559,7 @@ export class ServiceViewManager {
     }
     let last: string | null = null
     for (const id of [...this.visible]) {
+      this.closeDevToolsIfOpen(id)
       this.views.get(id)?.setVisible(false)
       this.cancelSnapshot(id)
       last = id
@@ -585,16 +604,19 @@ export class ServiceViewManager {
     }
   }
 
-  /** Снимок вкладки (data URL) — без hide. */
+  /** Снимок вкладки (data URL) — без hide. Пусто → последний кэш (для switcher). */
   async capture(serviceId: string): Promise<string | null> {
+    const cached = this.snapshots.get(serviceId) ?? null
     const view = this.views.get(serviceId)
-    if (!view || view.webContents.isDestroyed()) return null
+    if (!view || view.webContents.isDestroyed()) return cached
     try {
       const img = await view.webContents.capturePage()
-      if (img.isEmpty()) return null
-      return img.toDataURL()
+      if (img.isEmpty()) return cached
+      const url = img.toDataURL()
+      this.snapshots.set(serviceId, url)
+      return url
     } catch {
-      return null
+      return cached
     }
   }
 
@@ -643,6 +665,7 @@ export class ServiceViewManager {
       return this.snapshots.get(serviceId) ?? null
     }
     if (this.visible.has(serviceId)) {
+      this.closeDevToolsIfOpen(serviceId)
       this.cancelSnapshot(serviceId)
       view.setVisible(false)
       this.visible.delete(serviceId)
@@ -689,8 +712,25 @@ export class ServiceViewManager {
     return title || null
   }
 
+  /**
+   * DevTools только отдельным окном. У WebContentsView docked-режим забирает
+   * всю площадь вкладки, и закрыть его из UI почти нельзя — поэтому toggle
+   * и никогда не right/bottom.
+   */
   openDevTools(serviceId: string): void {
-    this.views.get(serviceId)?.webContents.openDevTools({ mode: 'detach' })
+    const wc = this.views.get(serviceId)?.webContents
+    if (!wc || wc.isDestroyed()) return
+    if (wc.isDevToolsOpened()) {
+      wc.closeDevTools()
+      return
+    }
+    wc.openDevTools({ mode: 'detach', activate: true })
+  }
+
+  private closeDevToolsIfOpen(id: string): void {
+    const wc = this.views.get(id)?.webContents
+    if (!wc || wc.isDestroyed()) return
+    if (wc.isDevToolsOpened()) wc.closeDevTools()
   }
 
   async clearEnvSession(envId: string): Promise<void> {
@@ -791,6 +831,7 @@ export class ServiceViewManager {
     if (!this.tabs.has(id) || this.activeTab === id) return
     const prev = this.activeTab
     const wasVisible = prev != null && this.visible.has(prev)
+    // hide() закроет DevTools предыдущей вкладки — иначе оверлей остаётся.
     if (prev) this.hide(prev)
     this.activeTab = id
     if (wasVisible) this.show(id)
@@ -868,6 +909,7 @@ export class ServiceViewManager {
     })
     const wc = view.webContents
     this.attachNavGuards(wc, tab.id)
+    this.attachDeskHotkeys(wc)
 
     // Своих окон у вебвью быть не должно: target=_blank и window.open
     // становятся новой вкладкой рядом с этой — как в любом браузере.
@@ -891,13 +933,26 @@ export class ServiceViewManager {
      * вкладку изнутри её же обработчика нельзя.
      */
     wc.on('before-input-event', (event, input) => {
-      if (input.type !== 'keyDown' || input.alt) return
+      if (input.type !== 'keyDown') return
       const mod = process.platform === 'darwin' ? input.meta : input.control
-      if (!mod) return
       const act = (fn: () => void): void => {
         event.preventDefault()
         setTimeout(fn, 0)
       }
+      // Esc / ⌥⌘I / Ctrl+Shift+I — закрыть залипший DevTools.
+      if (input.key === 'Escape' && wc.isDevToolsOpened()) {
+        act(() => this.closeDevToolsIfOpen(tab.id))
+        return
+      }
+      if (
+        mod &&
+        (input.key.toLowerCase() === 'i' || input.code === 'KeyI') &&
+        (input.alt || input.shift)
+      ) {
+        act(() => this.openDevTools(tab.id))
+        return
+      }
+      if (input.alt || !mod) return
       switch (input.key.toLowerCase()) {
         case 't':
           act(() => this.newTab({ envId: tab.envId, afterId: tab.id }))
@@ -1015,6 +1070,7 @@ export class ServiceViewManager {
   dispose(serviceId: string): void {
     const view = this.views.get(serviceId)
     if (!view) return
+    this.closeDevToolsIfOpen(serviceId)
     this.visible.delete(serviceId)
     this.chrome.delete(serviceId)
     this.snapshots.delete(serviceId)

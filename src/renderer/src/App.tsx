@@ -2,6 +2,7 @@ import { useEffect, useState, type JSX } from 'react'
 import { TitleBar } from '@/components/TitleBar'
 import { Desktop } from '@/components/Desktop'
 import { Dock } from '@/components/Dock'
+import { WindowSwitcher } from '@/components/WindowSwitcher'
 import { IdleGuard } from '@/components/IdleGuard'
 import { LoadingScreen } from '@/components/LoadingScreen'
 import { Onboarding } from '@/components/Onboarding'
@@ -96,6 +97,7 @@ export default function App(): JSX.Element {
           <Dock />
         </div>
 
+        <WindowSwitcher />
         <Toaster />
       </div>
     </IdleGuard>

@@ -78,6 +78,7 @@ function createWindow(): void {
   views.onBrowserChange = (state) => win?.webContents.send(CH.browserChanged, state)
   views.onLoadingChange = (id, loading) =>
     win?.webContents.send(CH.viewLoadingChanged, { id, loading })
+  views.onCycleWindow = (dir) => win?.webContents.send(CH.deskCycleWindow, dir)
 
   win.on('ready-to-show', () => win?.show())
   // Закрытие окна прячет приложение в трей, а не выгружает его: уведомления и

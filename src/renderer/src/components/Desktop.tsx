@@ -43,14 +43,31 @@ export function Desktop(): JSX.Element {
     return () => ro.disconnect()
   }, [setDesktopSize])
 
-  // Esc: сначала вернуть окна со стола, иначе закрыть верхнее окно.
+  const cycleWindow = useStore((s) => s.cycleWindow)
+
+  // Esc: switcher → вернуть окна со стола → закрыть верхнее.
+  // ⌘` / ⌘⇧` — лента миниатюр (подтверждение на keyup ⌘ / settle).
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      const mod = e.metaKey || e.ctrlKey
+      if (mod && (e.code === 'Backquote' || e.key === '`')) {
+        if (e.defaultPrevented) return
+        // Switcher сам использует popoverDepth — не блокируем повторные ⌘`.
+        if (!useStore.getState().windowSwitcher && isPopoverOpen()) return
+        if (document.querySelector('[data-slot="dialog-content"]')) return
+        e.preventDefault()
+        cycleWindow(e.shiftKey ? -1 : 1)
+        return
+      }
       if (e.key !== 'Escape') return
       if (e.defaultPrevented) return
+      const st = useStore.getState()
+      if (st.windowSwitcher) {
+        st.cancelWindowSwitcher()
+        return
+      }
       if (isPopoverOpen()) return
       if (document.querySelector('[data-slot="dialog-content"]')) return
-      const st = useStore.getState()
       if (st.arranged) {
         peekDesktop(size)
         return
@@ -62,7 +79,14 @@ export function Desktop(): JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [closeWindow, peekDesktop, size])
+  }, [closeWindow, peekDesktop, size, cycleWindow])
+
+  // Фокус в вебвью — keydown до рендерера не доходит; main шлёт IPC.
+  useEffect(() => {
+    return window.kontur.nav.onCycleWindow((dir) => {
+      useStore.getState().cycleWindow(dir)
+    })
+  }, [])
 
   const toggleShowDesktop = (): void => {
     const st = useStore.getState()

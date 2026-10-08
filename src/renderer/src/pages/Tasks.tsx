@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type JSX } from 'react'
-import { Kanban, Loader2, RefreshCw } from 'lucide-react'
+import { Eye, EyeOff, Kanban, Loader2, RefreshCw } from 'lucide-react'
 import type { Item } from '@shared/types'
 import { useStore } from '@/store'
 import { Button } from '@/components/ui/button'
@@ -73,6 +73,20 @@ function shortDate(ts: number): string {
   return new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 
+/** Закрытые / отменённые — по категории done или имени статуса. */
+function isClosedColumn(col: BoardColumn): boolean {
+  if (col.category === 'done') return true
+  const n = `${col.title} ${col.statusName}`.toLowerCase()
+  return (
+    n.includes('cancel') ||
+    n.includes('отмен') ||
+    n.includes('closed') ||
+    n.includes('закрыт') ||
+    n.includes('rejected') ||
+    n.includes('declined')
+  )
+}
+
 function itemToCard(item: Item): CardData {
   const meta = parseMeta(item.body)
   const tags: CardTag[] = []
@@ -88,20 +102,30 @@ function itemToCard(item: Item): CardData {
   }
 }
 
+/**
+ * К какой колонке относится задача. При наличии sid — только по нему
+ * (иначе старый sid + новое state давали дубль в двух колонках).
+ */
 function columnMatchesItem(col: BoardColumn, item: Item): boolean {
   const sid = parseSid(item.body)
   if (col.statusIds.length) {
-    if (sid && col.statusIds.includes(sid)) return true
-    if (item.state && col.statusIds.length) {
-      // имя статуса совпало с statusName колонки (или входит в title)
-      if (item.state.toLowerCase() === col.statusName.toLowerCase()) return true
-      if (item.state.toLowerCase() === col.title.toLowerCase()) return true
-    }
-    return false
+    if (sid) return col.statusIds.includes(sid)
+    if (!item.state) return false
+    const state = item.state.toLowerCase()
+    return state === col.statusName.toLowerCase() || state === col.title.toLowerCase()
   }
-  // Fallback-колонки cat:*
   if (col.id.startsWith('cat:')) return parseCat(item.body) === col.category
   return item.state?.toLowerCase() === col.title.toLowerCase()
+}
+
+function replaceSid(body: string, sid: string | undefined): string {
+  const without = body
+    .split('\n')
+    .filter((l) => !l.startsWith('sid:'))
+    .join('\n')
+    .replace(/\n+$/, '')
+  if (!sid) return without
+  return without ? `${without}\nsid:${sid}` : `sid:${sid}`
 }
 
 /**
@@ -117,6 +141,10 @@ export function Tasks(): JSX.Element {
   const [error, setError] = useState<string | null>(null)
   /** Пока нет ответа board() — не рисуем fallback cat:* (иначе колонки скачут). */
   const [boardBooting, setBoardBooting] = useState(true)
+  /** Скрыть колонки без карточек. */
+  const [hideEmpty, setHideEmpty] = useState(true)
+  /** Скрыть Done / Canceled и прочие закрытые. */
+  const [hideClosed, setHideClosed] = useState(true)
 
   const jiraServices = (config?.services ?? []).filter((s) => s.kind === 'jira' && s.enabled)
 
@@ -170,16 +198,20 @@ export function Tasks(): JSX.Element {
           { id: 'cat:done', title: 'Готово', category: 'done', statusIds: [], statusName: '' }
         ] satisfies BoardColumn[])
 
-    const used = new Set<string>()
+    // Одна задача — одна колонка (первый матч по порядку доски).
+    const assigned = new Map<string, string>()
+    for (const col of cols) {
+      for (const it of items) {
+        if (assigned.has(it.id)) continue
+        if (columnMatchesItem(col, it)) assigned.set(it.id, col.id)
+      }
+    }
+
     const result: ColumnData[] = cols.map((col) => {
       const cards = items
-        .filter((it) => columnMatchesItem(col, it))
+        .filter((it) => assigned.get(it.id) === col.id)
         .sort((a, b) => b.updatedAt - a.updatedAt)
-        .map((it) => {
-          used.add(it.id)
-          return itemToCard(it)
-        })
-      // В «Готово» без доски — не раздуваем 90 днями
+        .map(itemToCard)
       const clipped =
         col.category === 'done' && col.id.startsWith('cat:') ? cards.slice(0, 12) : cards
       return {
@@ -191,16 +223,20 @@ export function Tasks(): JSX.Element {
     })
 
     // Задачи, не попавшие ни в одну колонку доски — в первую колонку своей категории.
-    const orphans = items.filter((it) => !used.has(it.id))
+    const orphans = items.filter((it) => !assigned.has(it.id))
     for (const it of orphans) {
       const cat = parseCat(it.body)
-      const target =
-        result.find((c) => c.kind === kindOf(cat)) ?? result[0]
+      const target = result.find((c) => c.kind === kindOf(cat)) ?? result[0]
       if (target) target.cards.push(itemToCard(it))
     }
 
-    return result
-  }, [boardCols, items])
+    return result.filter((col) => {
+      const meta = cols.find((c) => c.id === col.id)
+      if (hideClosed && meta && isClosedColumn(meta)) return false
+      if (hideEmpty && col.cards.length === 0) return false
+      return true
+    })
+  }, [boardCols, items, hideEmpty, hideClosed])
 
   const sync = async (): Promise<void> => {
     setSyncing(true)
@@ -224,18 +260,16 @@ export function Tasks(): JSX.Element {
     if (!col) return
 
     setError(null)
-    // Оптимистично
+    const sid = col.statusIds[0]
+    // Оптимистично: и state, и sid — иначе дубль в старой/новой колонке.
     setItems((prev) =>
       prev.map((it) => {
         if (it.id !== cardId) return it
-        const body = it.body
-          .replace(/cat:\w+/, `cat:${col.category}`)
-          .replace(/\nsid:[^\n]*/, '')
-        const sid = col.statusIds[0]
+        const body = it.body.replace(/cat:\w+/, `cat:${col.category}`)
         return {
           ...it,
           state: col.statusName || col.title,
-          body: sid ? `${body}\nsid:${sid}` : body,
+          body: replaceSid(body, sid),
           updatedAt: Date.now()
         }
       })
@@ -246,7 +280,6 @@ export function Tasks(): JSX.Element {
         ? { category: col.category }
         : {
             statusName: col.statusName || col.title,
-            // Колонка доски = набор статусов; матчим любой доступный переход в них.
             statusIds: col.statusIds
           }
       const next = await window.kontur.tasks.transition(cardId, target)
@@ -259,7 +292,7 @@ export function Tasks(): JSX.Element {
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 pt-5 pb-4 sm:px-6 lg:px-8">
-      <div className="mb-4 flex shrink-0 items-center gap-3">
+      <div className="mb-4 flex shrink-0 flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1">
           <h1 className="text-[26px] leading-tight font-semibold tracking-tight">Задачи</h1>
           <p className="mt-1 text-muted-foreground">
@@ -268,10 +301,29 @@ export function Tasks(): JSX.Element {
               : 'Мои задачи из Jira · укажи проект в настройках сервиса — подтянем статусы'}
           </p>
         </div>
-        <Button size="sm" variant="outline" disabled={syncing} onClick={() => void sync()}>
-          <RefreshCw className={cn(syncing && 'animate-spin')} />
-          Обновить
-        </Button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button
+            size="sm"
+            variant={hideEmpty ? 'secondary' : 'outline'}
+            title={hideEmpty ? 'Показать пустые колонки' : 'Скрыть пустые колонки'}
+            onClick={() => setHideEmpty((v) => !v)}
+          >
+            {hideEmpty ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+            {hideEmpty ? 'Только с задачами' : 'Все колонки'}
+          </Button>
+          <Button
+            size="sm"
+            variant={hideClosed ? 'secondary' : 'outline'}
+            title={hideClosed ? 'Показать Done / Canceled' : 'Скрыть Done / Canceled'}
+            onClick={() => setHideClosed((v) => !v)}
+          >
+            {hideClosed ? 'Скрыты закрытые' : 'Скрыть закрытые'}
+          </Button>
+          <Button size="sm" variant="outline" disabled={syncing} onClick={() => void sync()}>
+            <RefreshCw className={cn(syncing && 'animate-spin')} />
+            Обновить
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -297,6 +349,13 @@ export function Tasks(): JSX.Element {
           <Kanban className="size-6 text-muted-foreground" />
           <p className="max-w-md text-[13px] text-muted-foreground/80">
             Пока пусто. Нажми «Обновить», когда контур поднят и Jira доступна.
+          </p>
+        </div>
+      ) : columns.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-16 text-center">
+          <Kanban className="size-6 text-muted-foreground" />
+          <p className="max-w-md text-[13px] text-muted-foreground/80">
+            Все колонки скрыты фильтрами — включи «Все колонки» или покажи закрытые.
           </p>
         </div>
       ) : (

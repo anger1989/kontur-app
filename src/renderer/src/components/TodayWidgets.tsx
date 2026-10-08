@@ -27,11 +27,21 @@ import { TodayMeetingsCarousel } from './TodayMeetingsCarousel'
 import { TodosWidget } from './TodosWidget'
 import { AutomationsWidget } from './AutomationsWidget'
 import { GlowingEffect } from '@/components/ui/glowing-effect'
+import { AnimatedList } from '@/components/ui/animated-list'
 import { WidgetHeader } from '@/components/ui/stats-card'
 import { DOCK_CLEARANCE } from '@/lib/deskLayout'
 import { toast } from '@/components/ui/toast'
 import { WIDGET_IDS, WIDGET_TITLES, type WidgetId, type WidgetLayout } from '@shared/types'
 import { cn } from '@/lib/utils'
+
+/** Акцент иконки карточки внимания — по виду элемента. */
+const KIND_COLOR: Record<string, string> = {
+  task: '#f09a05',
+  review: '#3b82f6',
+  message: '#10b981',
+  mail: '#f09a05',
+  page: '#8b94a3'
+}
 
 const KIND_ICON: Record<string, LucideIcon> = {
   task: ListTodo,
@@ -270,36 +280,53 @@ function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: nu
               ))}
           </div>
 
-          {/* Свой скролл — список может быть куда длиннее шести строк. Высоту задаёт
-              стол: на низком окне длинный список не должен распирать колонку. */}
-          <div className="space-y-px overflow-y-auto" style={{ maxHeight: listHeight ?? 288 }}>
-            {shown.map(({ it }) => {
-              const Icon = KIND_ICON[it.kind] ?? FileText
-              const accent = config?.envs.find((e) => e.id === it.envId)?.accent
-              const serviceName = config?.services.find((s) => s.id === it.serviceId)?.name
-              return (
-                <button
-                  key={it.id}
-                  type="button"
-                  onClick={() => openItem(it)}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-foreground/5"
-                >
-                  <span className="desk-tile flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground">
-                    <Icon className="size-3.5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-medium">{it.title}</span>
-                    <span className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-                      <span className="size-1.5 shrink-0 rounded-full" style={{ background: accent }} />
-                      <span className="truncate">{serviceName ?? it.serviceId}</span>
+          {/* AnimatedList: spring при появлении/уходе; скролл — снаружи. */}
+          <div className="overflow-y-auto pr-0.5" style={{ maxHeight: listHeight ?? 288 }}>
+            <AnimatedList className="gap-1.5">
+              {shown.map(({ it }) => {
+                const Icon = KIND_ICON[it.kind] ?? FileText
+                const accent = config?.envs.find((e) => e.id === it.envId)?.accent
+                const serviceName = config?.services.find((s) => s.id === it.serviceId)?.name
+                const tint = KIND_COLOR[it.kind] ?? '#64748b'
+                return (
+                  <button
+                    key={it.id}
+                    type="button"
+                    onClick={() => openItem(it)}
+                    className={cn(
+                      'relative flex w-full items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left',
+                      'transition-[transform,background-color] duration-200 ease-out hover:scale-[1.02]',
+                      'bg-foreground/[0.03] hover:bg-foreground/[0.06]',
+                      'dark:bg-white/[0.04] dark:hover:bg-white/[0.07]',
+                      'dark:[box-shadow:0_-12px_40px_-16px_#ffffff14_inset] dark:backdrop-blur-md',
+                      'border border-transparent dark:border-white/10'
+                    )}
+                  >
+                    <span
+                      className="flex size-8 shrink-0 items-center justify-center rounded-xl text-white"
+                      style={{ backgroundColor: tint }}
+                    >
+                      <Icon className="size-3.5" strokeWidth={2.25} />
                     </span>
-                  </span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-                    {shortTime(it.updatedAt)}
-                  </span>
-                </button>
-              )
-            })}
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-baseline gap-1.5">
+                        <span className="min-w-0 truncate text-[13px] font-medium">{it.title}</span>
+                        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                          {shortTime(it.updatedAt)}
+                        </span>
+                      </span>
+                      <span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+                        <span
+                          className="size-1.5 shrink-0 rounded-full"
+                          style={{ background: accent }}
+                        />
+                        <span className="truncate">{serviceName ?? it.serviceId}</span>
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
+            </AnimatedList>
           </div>
         </>
       )}

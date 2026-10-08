@@ -127,6 +127,8 @@ export const CH = {
   openPage: 'app:openPage',
   openRoute: 'app:openRoute',
   joinMeeting: 'app:joinMeeting',
+  /** Main → renderer: ⌘` / ⌘⇧` из вебвью — листать окна стола. */
+  deskCycleWindow: 'desk:cycleWindow',
   notifyTest: 'app:notifyTest',
   mcpInfo: 'mcp:info',
   mcpAgents: 'mcp:agents',

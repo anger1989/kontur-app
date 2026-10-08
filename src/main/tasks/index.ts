@@ -70,11 +70,11 @@ export async function transitionTask(
     result.category === 'done' || result.category === 'indeterminate' || result.category === 'new'
       ? result.category
       : 'new'
-
+  // Без нового sid карточка матчилась и по старому sid, и по новому state → дубль в двух колонках.
   const next: Item = {
     ...existing,
     state: result.statusName,
-    body: rebuildBody(meta, cat),
+    body: rebuildBody(meta, cat, result.statusId),
     updatedAt: Date.now()
   }
   upsertItems([next])

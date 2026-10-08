@@ -89,6 +89,11 @@ interface State {
   arranged: boolean
   /** Текущий размер рабочего стола — от него считаются виджеты и док. */
   desktop: { width: number; height: number }
+  /**
+   * Переключатель окон (⌘` / ⌘⇧`): лента миниатюр, пока не отпустят модификатор
+   * или не сработает settle-таймер.
+   */
+  windowSwitcher: { ids: string[]; index: number } | null
 
   load: () => Promise<void>
   /**
@@ -111,6 +116,15 @@ interface State {
   closeWindow: (id: string) => void
   /** Поднять окно наверх (и снять минимизацию, если была). */
   focusWindow: (id: string) => void
+  /**
+   * Листать открытые окна стола (⌘` / ⌘⇧`) — открывает/двигает switcher
+   * с миниатюрами; подтверждение — отдельно (keyup / таймер / клик).
+   */
+  cycleWindow: (dir: 1 | -1) => void
+  /** Применить выбор в switcher и закрыть ленту. */
+  confirmWindowSwitcher: () => void
+  /** Закрыть switcher без смены фокуса. */
+  cancelWindowSwitcher: () => void
   minimizeWindow: (id: string) => void
   toggleMaximize: (id: string, bounds: { width: number; height: number }) => void
   clearFromDock: (id: string) => void
@@ -534,6 +548,7 @@ export const useStore = create<State>((set, get) => ({
   browser: { tabs: [], activeId: null },
   arranged: false,
   desktop: { width: 1024, height: 700 },
+  windowSwitcher: null,
 
   setDesktopSize: (size) => {
     const width = Math.round(size.width)
@@ -727,6 +742,47 @@ export const useStore = create<State>((set, get) => ({
       windowSeq: z
     })
     reconcileActiveService(get)
+  },
+
+  cycleWindow: (dir) => {
+    restoreFromArrange(set, get)
+    const open = get().windows.filter((w) => !w.minimized)
+    if (open.length < 2) return
+
+    const sw = get().windowSwitcher
+    if (sw) {
+      // Лента уже открыта — только двигаем курсор. Список ids фиксируем на старте,
+      // чтобы не прыгал порядок, пока пользователь листает.
+      const ids = sw.ids.filter((id) => open.some((w) => w.id === id))
+      if (ids.length < 2) {
+        set({ windowSwitcher: null })
+        return
+      }
+      const currentId = sw.ids[sw.index]
+      let cur = currentId ? ids.indexOf(currentId) : -1
+      if (cur < 0) cur = 0
+      const index = (cur + dir + ids.length) % ids.length
+      set({ windowSwitcher: { ids, index } })
+      return
+    }
+
+    // MRU: сверху вниз по z. Первый ⌘` → следующее (как Cmd+Tab).
+    const ids = [...open].sort((a, b) => b.z - a.z).map((w) => w.id)
+    const index = (dir + ids.length) % ids.length
+    set({ windowSwitcher: { ids, index } })
+  },
+
+  confirmWindowSwitcher: () => {
+    const sw = get().windowSwitcher
+    if (!sw) return
+    const id = sw.ids[sw.index]
+    set({ windowSwitcher: null })
+    if (id) get().focusWindow(id)
+  },
+
+  cancelWindowSwitcher: () => {
+    if (!get().windowSwitcher) return
+    set({ windowSwitcher: null })
   },
 
   minimizeWindow: (id) => {

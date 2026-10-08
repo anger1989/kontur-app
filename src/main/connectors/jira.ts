@@ -337,7 +337,7 @@ export async function jiraTransition(
   ctx: SyncContext,
   issueKey: string,
   target: { statusName?: string; category?: string; statusIds?: string[] }
-): Promise<{ statusName: string; category: string }> {
+): Promise<{ statusName: string; category: string; statusId: string | null }> {
   const root = base(ctx.service.baseUrl)
   const data = await getJson<JiraTransitions>(ctx, `${root}/rest/api/2/issue/${issueKey}/transitions`)
   const wantIds = new Set((target.statusIds ?? []).map(String))
@@ -379,7 +379,8 @@ export async function jiraTransition(
   })
   return {
     statusName: hit.to.name,
-    category: hit.to.statusCategory?.key ?? target.category ?? 'new'
+    category: hit.to.statusCategory?.key ?? target.category ?? 'new',
+    statusId: hit.to.id != null ? String(hit.to.id) : (target.statusIds?.[0] ?? null)
   }
 }
 

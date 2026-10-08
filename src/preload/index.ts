@@ -369,6 +369,14 @@ const api = {
       return (): void => {
         ipcRenderer.off(CH.joinMeeting, h)
       }
+    },
+    /** ⌘` из вебвью: листать окна стола (dir +1 вперёд, −1 назад). */
+    onCycleWindow: (cb: (dir: 1 | -1) => void) => {
+      const h = (_e: unknown, dir: 1 | -1): void => cb(dir)
+      ipcRenderer.on(CH.deskCycleWindow, h)
+      return (): void => {
+        ipcRenderer.off(CH.deskCycleWindow, h)
+      }
     }
   },
   icons: {

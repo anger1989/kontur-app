@@ -184,64 +184,73 @@ export function Browser({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* ── Полоса вкладок ─────────────────────────────────────────── */}
-      <div className="flex h-9 shrink-0 items-end gap-1 border-b border-white/10 bg-muted/40 px-1.5 pb-1">
+      {/* «+» сразу за последней вкладкой (не у правого края окна). */}
+      <div className="flex h-9 w-full shrink-0 items-end gap-0.5 border-b border-white/10 bg-muted/40 px-1.5 pb-1">
         <div
           ref={stripRef}
-          className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex min-w-0 items-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{
+            // Ширина по числу вкладок; при нехватке места — скролл, «+» остаётся рядом.
+            maxWidth: `min(calc(100% - 2.5rem), ${Math.max(tabs.length, 1) * TAB_MAX_WIDTH + Math.max(tabs.length - 1, 0) * 4}px)`
+          }}
         >
-          {tabs.map((tab) => {
-            const env = envs.find((e) => e.id === tab.envId)
-            const isActive = tab.id === activeId
-            return (
-              <div
-                key={tab.id}
-                data-tab-id={tab.id}
-                onPointerDown={startTabDrag(tab.id)}
-                onAuxClick={(e) => {
-                  // Средняя кнопка закрывает вкладку — как в любом браузере.
-                  if (e.button === 1) void window.kontur.browser.closeTab(tab.id)
-                }}
-                className={cn(
-                  'group/tab flex h-7 min-w-0 flex-1 cursor-default items-center gap-1.5 rounded-lg px-2',
-                  'transition-[box-shadow,background-color,color]',
-                  isActive
-                    ? 'desk-tile text-foreground'
-                    : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'
-                )}
-                style={{ minWidth: TAB_MIN_WIDTH, maxWidth: TAB_MAX_WIDTH }}
-              >
-                <span
-                  className="size-1.5 shrink-0 rounded-full"
-                  title={env?.name ?? tab.envId}
-                  style={{ background: env?.accent }}
-                />
-                <TabIcon tab={tab} />
-                <button
-                  type="button"
-                  title={`${tab.title}\n${tab.url}`}
-                  onClick={() => void window.kontur.browser.activateTab(tab.id)}
-                  className="min-w-0 flex-1 truncate text-left text-[12px]"
-                >
-                  {tab.title}
-                </button>
-                <button
-                  type="button"
-                  aria-label="Закрыть вкладку"
-                  onClick={() => void window.kontur.browser.closeTab(tab.id)}
+            {tabs.map((tab) => {
+              const env = envs.find((e) => e.id === tab.envId)
+              const isActive = tab.id === activeId
+              return (
+                <div
+                  key={tab.id}
+                  data-tab-id={tab.id}
+                  onPointerDown={startTabDrag(tab.id)}
+                  onAuxClick={(e) => {
+                    // Средняя кнопка закрывает вкладку — как в любом браузере.
+                    if (e.button === 1) void window.kontur.browser.closeTab(tab.id)
+                  }}
                   className={cn(
-                    'flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground',
-                    'opacity-0 transition-opacity group-hover/tab:opacity-100 hover:bg-foreground/10 hover:text-foreground',
-                    isActive && 'opacity-70'
+                    'group/tab flex h-7 min-w-0 cursor-default items-center gap-1.5 rounded-lg px-2',
+                    'transition-[box-shadow,background-color,color]',
+                    isActive
+                      ? 'desk-tile text-foreground'
+                      : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'
                   )}
+                  style={{
+                    flex: `1 1 ${TAB_MAX_WIDTH}px`,
+                    minWidth: TAB_MIN_WIDTH,
+                    maxWidth: TAB_MAX_WIDTH
+                  }}
                 >
-                  <X className="size-3" />
-                </button>
-              </div>
-            )
-          })}
+                  <span
+                    className="size-1.5 shrink-0 rounded-full"
+                    title={env?.name ?? tab.envId}
+                    style={{ background: env?.accent }}
+                  />
+                  <TabIcon tab={tab} />
+                  <button
+                    type="button"
+                    title={`${tab.title}\n${tab.url}`}
+                    onClick={() => void window.kontur.browser.activateTab(tab.id)}
+                    className="min-w-0 flex-1 truncate text-left text-[12px]"
+                  >
+                    {tab.title}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Закрыть вкладку"
+                    onClick={() => void window.kontur.browser.closeTab(tab.id)}
+                    className={cn(
+                      'flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground',
+                      'opacity-0 transition-opacity group-hover/tab:opacity-100 hover:bg-foreground/10 hover:text-foreground',
+                      isActive && 'opacity-70'
+                    )}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              )
+            })}
         </div>
 
-        <div className="flex shrink-0 items-center">
+        <div className="mb-0.5 flex shrink-0 items-center">
           <Button
             type="button"
             size="icon-xs"
@@ -260,7 +269,7 @@ export function Browser({
                   <ChevronDown className="size-3" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-56 p-1">
+              <PopoverContent align="start" className="w-56 p-1">
                 <p className="px-2 py-1.5 text-[11px] tracking-[0.06em] text-muted-foreground uppercase">
                   Новая вкладка в контуре
                 </p>
@@ -384,7 +393,7 @@ export function Browser({
           type="button"
           size="icon-xs"
           variant="ghost"
-          title="Инструменты разработчика"
+          title="DevTools — отдельное окно (повторный клик или ⌥⌘I закрывает)"
           disabled={!activeId}
           onClick={() => activeId && void window.kontur.browser.devTools(activeId)}
         >
