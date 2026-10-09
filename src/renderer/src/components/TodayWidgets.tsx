@@ -1,4 +1,6 @@
 import {
+  memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -7,7 +9,8 @@ import {
   type CSSProperties,
   type JSX,
   type PointerEvent as ReactPointerEvent,
-  type ReactNode
+  type ReactNode,
+  type UIEvent as ReactUIEvent
 } from 'react'
 import {
   AtSign,
@@ -196,14 +199,92 @@ function attentionKind(it: Item): AttentionKind | null {
   return null
 }
 
+/** Сколько строк монтируем сразу / догружаем при скролле. */
+const ATTENTION_PAGE = 32
+
+/** Поля, от которых зависит строка внимания — без них setState не трогаем. */
+function attentionRowSig(it: Item): string {
+  const cat =
+    it.kind === 'task' ? (it.body.split('\n').find((l) => l.startsWith('cat:')) ?? '') : ''
+  return `${it.id}\0${it.updatedAt}\0${it.unread ? 1 : 0}\0${it.mentioned ? 1 : 0}\0${it.title}\0${it.state ?? ''}\0${cat}`
+}
+
+function sameAttentionItems(prev: Item[], next: Item[]): boolean {
+  if (prev.length !== next.length) return false
+  const a = prev.map(attentionRowSig).sort()
+  const b = next.map(attentionRowSig).sort()
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+const AttentionListItem = memo(function AttentionListItem({
+  item,
+  accent,
+  serviceName,
+  onOpen
+}: {
+  item: Item
+  accent?: string
+  serviceName?: string
+  onOpen: (item: Item) => void
+}): JSX.Element {
+  const Icon = KIND_ICON[item.kind] ?? FileText
+  const tint = KIND_COLOR[item.kind] ?? '#64748b'
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(item)}
+      className={cn(
+        'relative flex w-full max-w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left',
+        'transition-colors duration-200 ease-out',
+        'bg-foreground/[0.03] hover:bg-foreground/[0.06]',
+        'dark:bg-white/[0.04] dark:hover:bg-white/[0.07]',
+        'dark:[box-shadow:0_-12px_40px_-16px_#ffffff14_inset] dark:backdrop-blur-md',
+        'border border-transparent dark:border-white/10'
+      )}
+    >
+      <span
+        className="flex size-8 shrink-0 items-center justify-center rounded-xl text-white"
+        style={{ backgroundColor: tint }}
+      >
+        <Icon className="size-3.5" strokeWidth={2.25} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-1.5">
+          <span className="min-w-0 truncate text-[13px] font-medium">{item.title}</span>
+          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+            {shortTime(item.updatedAt)}
+          </span>
+        </span>
+        <span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+          <span className="size-1.5 shrink-0 rounded-full" style={{ background: accent }} />
+          <span className="truncate">{serviceName ?? item.serviceId}</span>
+        </span>
+      </span>
+    </button>
+  )
+})
+
+AttentionListItem.displayName = 'AttentionListItem'
+
 /** Требует внимания: непрочитанные письма/упоминания и задачи, с фильтром по виду и прокруткой. */
 function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: number } = {}): JSX.Element {
-  const { config, openItem } = useStore()
+  // Узкие селекторы: иначе любой тик store (окна/док) перерисовывает весь список.
+  const envs = useStore((s) => s.config?.envs)
+  const services = useStore((s) => s.config?.services)
+  const openItem = useStore((s) => s.openItem)
+
   const [items, setItems] = useState<Item[]>([])
   const [filter, setFilter] = useState<AttentionKind | null>(null)
+  const [visibleCount, setVisibleCount] = useState(ATTENTION_PAGE)
+  const listRef = useRef<HTMLDivElement>(null)
+  const loadGen = useRef(0)
 
   useEffect(() => {
+    let cancelled = false
     const load = (): void => {
+      const gen = ++loadGen.current
       // Не один query(limit:500) по всему кэшу: свежие прочитанные задачи/события
       // вытесняли старые unread MM/почту из окна — виджет молча недобирал ленту.
       void Promise.all([
@@ -213,13 +294,20 @@ function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: nu
         window.kontur.items.query({ kinds: ['message', 'page'], unreadOnly: true, limit: 500 }),
         window.kontur.items.query({ kinds: ['message', 'page'], mentionedOnly: true, limit: 500 })
       ]).then((chunks) => {
+        if (cancelled || gen !== loadGen.current) return
         const byId = new Map<string, Item>()
         for (const list of chunks) for (const it of list) byId.set(it.id, it)
-        setItems([...byId.values()])
+        const next = [...byId.values()]
+        // onChange часто шлёт тот же снимок — не трогаем state → нет re-render / re-anim.
+        setItems((prev) => (sameAttentionItems(prev, next) ? prev : next))
       })
     }
     load()
-    return window.kontur.items.onChange(load)
+    const off = window.kontur.items.onChange(load)
+    return (): void => {
+      cancelled = true
+      off()
+    }
   }, [])
 
   const all = useMemo(
@@ -237,7 +325,36 @@ function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: nu
     return c
   }, [all])
 
-  const shown = filter ? all.filter((x) => x.kind === filter) : all
+  const shown = useMemo(
+    () => (filter === null ? all : all.filter(({ kind }) => kind === filter)),
+    [all, filter]
+  )
+
+  const windowed = useMemo(() => shown.slice(0, visibleCount), [shown, visibleCount])
+
+  // Смена фильтра: новый key у AnimatedList (без exit-шторма) + окно с нуля.
+  useLayoutEffect(() => {
+    setVisibleCount(ATTENTION_PAGE)
+    listRef.current?.scrollTo({ top: 0 })
+  }, [filter])
+
+  const envAccentById = useMemo(
+    () => new Map(envs?.map((env) => [env.id, env.accent]) ?? []),
+    [envs]
+  )
+  const serviceNameById = useMemo(
+    () => new Map(services?.map((service) => [service.id, service.name]) ?? []),
+    [services]
+  )
+
+  const onListScroll = useCallback(
+    (e: ReactUIEvent<HTMLDivElement>) => {
+      const el = e.currentTarget
+      if (el.scrollTop + el.clientHeight < el.scrollHeight - 72) return
+      setVisibleCount((n) => (n >= shown.length ? n : Math.min(shown.length, n + ATTENTION_PAGE)))
+    },
+    [shown.length]
+  )
 
   const Wrap = bare ? 'div' : Glass
   return (
@@ -281,52 +398,32 @@ function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: nu
               ))}
           </div>
 
-          {/* AnimatedList: spring при появлении/уходе; только вертикальный скролл. */}
-          <div className="overflow-x-hidden overflow-y-auto pr-0.5" style={{ maxHeight: listHeight ?? 288 }}>
-            <AnimatedList className="min-w-0 gap-1.5">
-              {shown.map(({ it }) => {
-                const Icon = KIND_ICON[it.kind] ?? FileText
-                const accent = config?.envs.find((e) => e.id === it.envId)?.accent
-                const serviceName = config?.services.find((s) => s.id === it.serviceId)?.name
-                const tint = KIND_COLOR[it.kind] ?? '#64748b'
-                return (
-                  <button
-                    key={it.id}
-                    type="button"
-                    onClick={() => openItem(it)}
-                    className={cn(
-                      'relative flex w-full max-w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left',
-                      'transition-colors duration-200 ease-out',
-                      'bg-foreground/[0.03] hover:bg-foreground/[0.06]',
-                      'dark:bg-white/[0.04] dark:hover:bg-white/[0.07]',
-                      'dark:[box-shadow:0_-12px_40px_-16px_#ffffff14_inset] dark:backdrop-blur-md',
-                      'border border-transparent dark:border-white/10'
-                    )}
-                  >
-                    <span
-                      className="flex size-8 shrink-0 items-center justify-center rounded-xl text-white"
-                      style={{ backgroundColor: tint }}
-                    >
-                      <Icon className="size-3.5" strokeWidth={2.25} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-baseline gap-1.5">
-                        <span className="min-w-0 truncate text-[13px] font-medium">{it.title}</span>
-                        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-                          {shortTime(it.updatedAt)}
-                        </span>
-                      </span>
-                      <span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-                        <span
-                          className="size-1.5 shrink-0 rounded-full"
-                          style={{ background: accent }}
-                        />
-                        <span className="truncate">{serviceName ?? it.serviceId}</span>
-                      </span>
-                    </span>
-                  </button>
-                )
-              })}
+          {/*
+            key=фильтр: remount без AnimatePresence.exit на сотнях строк.
+            Окно ATTENTION_PAGE + догрузка по скроллу; stagger на первом mount.
+          */}
+          <div
+            ref={listRef}
+            onScroll={onListScroll}
+            className="overflow-x-hidden overflow-y-auto pr-0.5"
+            style={{ maxHeight: listHeight ?? 288 }}
+          >
+            <AnimatedList
+              key={filter ?? 'all'}
+              className="min-w-0 gap-1.5"
+              delay={0.035}
+              animateInitial
+              layout={false}
+            >
+              {windowed.map(({ it }) => (
+                <AttentionListItem
+                  key={it.id}
+                  item={it}
+                  accent={envAccentById.get(it.envId)}
+                  serviceName={serviceNameById.get(it.serviceId)}
+                  onOpen={openItem}
+                />
+              ))}
             </AnimatedList>
           </div>
         </>
