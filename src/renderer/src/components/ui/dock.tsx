@@ -6,12 +6,12 @@ import {
   useSpring,
   useTransform
 } from 'motion/react'
+import { GlowingEffect } from '@/components/ui/glowing-effect'
 import { cn } from '@/lib/utils'
 
 /**
- * Док: плотное стекло-таблетка + magnification.
- * Плитки непрозрачные — иначе при подъёме на hover полупрозрачные
- * квадраты «вылезают» на обои и выглядят грязно.
+ * Док: стекло + magnification + amber glow.
+ * Лёгкая прозрачность градиента — без слишком жидкого secondary/75.
  */
 
 export interface DockItem {
@@ -147,8 +147,8 @@ function DockIcon({
       <motion.div
         className={cn(
           'relative flex size-full items-center justify-center rounded-2xl shadow-lg ring-1',
-          'bg-gradient-to-b from-white/90 to-white/55 ring-black/10',
-          'dark:from-neutral-800 dark:to-neutral-900 dark:ring-white/10',
+          'bg-gradient-to-b from-white/80 to-white/40 ring-black/10',
+          'dark:from-neutral-800/88 dark:to-neutral-900/82 dark:ring-white/10',
           isFocused && 'ring-2 ring-primary/70'
         )}
         animate={{
@@ -156,6 +156,18 @@ function DockIcon({
         }}
         transition={{ type: 'spring', stiffness: 400, damping: 17 }}
       >
+        <GlowingEffect
+          className="z-10"
+          disabled={false}
+          glow
+          variant="amber"
+          proximity={72}
+          spread={42}
+          borderWidth={2}
+          inactiveZone={0.01}
+          movementDuration={0.35}
+        />
+
         <motion.div
           className="relative z-[1] flex items-center justify-center text-neutral-800 dark:text-white"
           style={{ width: iconW, height: iconH }}
