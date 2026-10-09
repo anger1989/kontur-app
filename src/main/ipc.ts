@@ -68,6 +68,7 @@ import { grabSessionToken } from './connectors/sessionToken'
 import { notifyTest, rebuildTrayMenu } from './tray'
 import { checkForUpdate, openUpdateDownload } from './update/check'
 import type { ServiceViewManager } from './views/serviceViews'
+import { openSafeExternal, safeAppPath, safeExternalUrl } from './security/externalOpen'
 
 export function registerIpc(getWin: () => BrowserWindow | null, views: () => ServiceViewManager | null): void {
   bindItemsChanged(getWin)
@@ -528,19 +529,21 @@ export function registerIpc(getWin: () => BrowserWindow | null, views: () => Ser
     if (buf.length > 6 * 1024 * 1024) throw new Error('Файл слишком большой (максимум 6 МБ)')
     return `data:${mime};base64,${buf.toString('base64')}`
   })
-  ipcMain.handle(CH.openExternal, (_e, url: string) => shell.openExternal(url))
+  ipcMain.handle(CH.openExternal, (_e, url: string) => openSafeExternal(url, true))
   // Нативный клиент. Опциональный url — передать в приложение (macOS: open -a App url).
   ipcMain.handle(CH.openApp, async (_e, appPath: string, url?: string) => {
+    const trustedAppPath = safeAppPath(appPath)
     if (url?.trim()) {
       try {
-        await execFileAsync('open', ['-a', appPath, url.trim()])
+        const trustedUrl = safeExternalUrl(url, true)
+        await execFileAsync('open', ['-a', trustedAppPath, trustedUrl])
         return
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
-        throw new Error(msg || `Не удалось открыть ${appPath}`)
+        throw new Error(msg || `Не удалось открыть ${trustedAppPath}`)
       }
     }
-    const err = await shell.openPath(appPath)
+    const err = await shell.openPath(trustedAppPath)
     if (err) throw new Error(err)
   })
   ipcMain.handle(CH.notifyTest, () => notifyTest())

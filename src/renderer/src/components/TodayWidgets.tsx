@@ -440,9 +440,20 @@ function placeWidgets(
  */
 export function TodayWidgets(): JSX.Element | null {
   const desk = useStore((s) => s.desktop)
+  const widgets = useStore((s) => s.config?.widgets)
+  const patchConfig = useStore((s) => s.patchConfig)
+  const assistantDetached = useStore((s) =>
+    s.windows.some(
+      (w) => w.route.kind === 'page' && w.route.page === 'assistant' && !w.minimized
+    )
+  )
   const box = useRef<HTMLDivElement>(null)
   /** Высоты виджетов по id — от них зависит, что куда влезет. */
   const [heights, setHeights] = useState<Record<string, number>>({})
+  const visibilityKey = WIDGET_IDS.map((id) => {
+    const visible = widgets?.[id]?.visible !== false
+    return `${id}:${visible && !(id === 'assistant' && assistantDetached) ? 1 : 0}`
+  }).join('|')
 
   // Высота виджета — самой карточки (GlowCell), без GLOW_PAD-обёртки.
   // Иначе вертикальный зазор получается WIDGET_GAP + 2×GLOW_PAD, а горизонтальный
@@ -473,10 +484,7 @@ export function TodayWidgets(): JSX.Element | null {
       if (card) ro.observe(card)
     }
     return () => ro.disconnect()
-  })
-
-  const widgets = useStore((s) => s.config?.widgets)
-  const patchConfig = useStore((s) => s.patchConfig)
+  }, [visibilityKey])
   /** Виджет, который тащат прямо сейчас: позиция живёт в state, не в конфиге. */
   const [drag, setDrag] = useState<{ id: WidgetId; x: number; y: number } | null>(null)
 
@@ -510,7 +518,11 @@ export function TodayWidgets(): JSX.Element | null {
     })
   }
 
-  const visible = WIDGET_IDS.filter((id) => layout(id).visible)
+  // Ассистент существует либо карточкой на столе, либо отдельным окном —
+  // заглушку-дубликат на его прежнем месте не оставляем.
+  const visible = WIDGET_IDS.filter(
+    (id) => layout(id).visible && !(id === 'assistant' && assistantDetached)
+  )
 
   // Виджет под мышью идёт за курсором и в укладке не участвует: иначе он
   // прыгал бы по слотам во время перетаскивания, а соседи расступались под

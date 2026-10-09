@@ -3,7 +3,6 @@ import {
   WebContentsView,
   desktopCapturer,
   session,
-  shell,
   type BaseWindow,
   type Rectangle,
   type Session,
@@ -15,6 +14,7 @@ import { getConfig, getEnv } from '../config/store'
 import { getSecret } from '../config/secrets'
 import { rememberFaviconUrl } from '../services/favicon'
 import { logInfo } from '../log'
+import { openSafeExternal } from '../security/externalOpen'
 
 /**
  * Встроенные сервисы живут в настоящих WebContentsView, а не в iframe.
@@ -307,7 +307,7 @@ export class ServiceViewManager {
         logInfo('views', `${viewId}: переход на ${url.split(':')[0]}: заблокирован`)
         return
       }
-      if (/^[a-z][a-z0-9+.-]*:/i.test(url)) void shell.openExternal(url)
+      if (/^[a-z][a-z0-9+.-]*:/i.test(url)) void openSafeExternal(url, true).catch(() => {})
     })
 
     wc.on('did-start-loading', () => this.setLoading(viewId, true))
@@ -325,8 +325,12 @@ export class ServiceViewManager {
     } else {
       void ses.setProxy({ mode: 'direct' })
     }
-    if (env.caCertPath || env.allowInsecureTls) {
+    if (env.allowInsecureTls) {
       ses.setCertificateVerifyProc((_request, callback) => callback(0))
+    } else {
+      // Важно сбросить обработчик: Session живёт дольше конкретного view, и
+      // прежнее insecure-настроение иначе продолжало действовать после выключения.
+      ses.setCertificateVerifyProc(null)
     }
     this.guardSession(ses)
     return ses
@@ -373,7 +377,7 @@ export class ServiceViewManager {
       } else if (blocksExternalApps(getConfig().services.find((x) => x.id === service.id))) {
         logInfo('views', `${service.id}: запуск внешнего приложения заблокирован (${url.split(':')[0]}:)`)
       } else {
-        void shell.openExternal(url)
+        void openSafeExternal(url, true).catch(() => {})
       }
       return { action: 'deny' }
     })
@@ -384,7 +388,7 @@ export class ServiceViewManager {
     this.attachDevToolsHotkeys(wc, service.id)
 
     wc.on('certificate-error', (event, _url, error, _cert, callback) => {
-      if (env.caCertPath || env.allowInsecureTls) {
+      if (env.allowInsecureTls) {
         event.preventDefault()
         callback(true)
       } else {
@@ -1048,7 +1052,7 @@ export class ServiceViewManager {
           activate: disposition !== 'background-tab'
         })
       } else {
-        void shell.openExternal(url)
+        void openSafeExternal(url, true).catch(() => {})
       }
       return { action: 'deny' }
     })
@@ -1115,7 +1119,7 @@ export class ServiceViewManager {
       this.emitBrowser()
     })
     wc.on('certificate-error', (event, _url, error, _cert, callback) => {
-      if (env.caCertPath || env.allowInsecureTls) {
+      if (env.allowInsecureTls) {
         event.preventDefault()
         callback(true)
       } else {

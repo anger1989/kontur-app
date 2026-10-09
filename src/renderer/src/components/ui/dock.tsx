@@ -6,7 +6,6 @@ import {
   useSpring,
   useTransform
 } from 'motion/react'
-import { GlowingEffect } from '@/components/ui/glowing-effect'
 import { cn } from '@/lib/utils'
 
 /**
@@ -25,8 +24,6 @@ export interface DockItem {
   open?: boolean
   /** Плитка в фокусе — чуть выше + акцент на кольце. */
   focused?: boolean
-  /** @deprecated используй open + focused */
-  active?: boolean
   /** Разделитель перед этим пунктом (между страницами и контурами). */
   separatorBefore?: boolean
 }
@@ -106,16 +103,12 @@ export function Dock({
   )
 }
 
-/** Алиас под имя из dock-tabs — тот же Dock. */
-export const DockTabs = Dock
-
 function DockIcon({
   title,
   icon,
   onClick,
   open,
   focused,
-  active,
   size,
   peak,
   mouseX
@@ -123,7 +116,7 @@ function DockIcon({
   const ref = useRef<HTMLButtonElement>(null)
   const [hovered, setHovered] = useState(false)
   const [pressed, setPressed] = useState(false)
-  const isOpen = open ?? active ?? false
+  const isOpen = open ?? false
   const isFocused = focused ?? false
 
   const distance = useTransform(mouseX, (val) => {
@@ -166,16 +159,6 @@ function DockIcon({
         }}
         transition={{ type: 'spring', stiffness: 400, damping: 17 }}
       >
-        <GlowingEffect
-          className="z-10"
-          disabled={false}
-          glow
-          proximity={64}
-          spread={40}
-          borderWidth={2}
-          inactiveZone={0.01}
-        />
-
         <motion.div
           className="relative z-[1] flex items-center justify-center text-neutral-800 dark:text-white"
           style={{ width: iconW, height: iconH }}

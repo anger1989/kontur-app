@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS items_updated  ON items(updated_at DESC);
 CREATE INDEX IF NOT EXISTS items_env_kind ON items(env_id, kind);
+CREATE INDEX IF NOT EXISTS items_env_kind_updated ON items(env_id, kind, updated_at DESC);
+CREATE INDEX IF NOT EXISTS items_service_kind_start ON items(service_id, kind, starts_at);
 
 -- Сквозной поиск. Внешнее содержимое, чтобы не дублировать тексты.
 CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
@@ -54,6 +56,7 @@ CREATE TABLE IF NOT EXISTS outbox (
   attempts         INTEGER NOT NULL DEFAULT 0,
   last_error       TEXT
 );
+CREATE INDEX IF NOT EXISTS outbox_env_created ON outbox(env_id, created_at);
 
 -- Курсоры инкрементальной синхронизации: с какого момента дочитывать каждый сервис.
 CREATE TABLE IF NOT EXISTS sync_state (
@@ -351,15 +354,6 @@ export function searchItems(query: string, limit = 100): Item[] {
     // Невалидный синтаксис FTS (пользователь печатает в реальном времени) — просто пустой результат.
     return []
   }
-}
-
-export function enqueueOutbox(entry: OutboxEntry): void {
-  conn()
-    .prepare(`
-      INSERT OR IGNORE INTO outbox (id, env_id, service_id, idempotency_key, action, payload, created_at, attempts, last_error)
-      VALUES (@id, @envId, @serviceId, @idempotencyKey, @action, @payload, @createdAt, @attempts, @lastError)
-    `)
-    .run({ ...entry, payload: JSON.stringify(entry.payload) })
 }
 
 export function outboxFor(envId: string): OutboxEntry[] {

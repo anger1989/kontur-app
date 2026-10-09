@@ -13,6 +13,7 @@ import {
 
 /** Сколько постов за раз тянем из канала с упоминаниями. */
 const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000
+const CHANNEL_FETCH_CONCURRENCY = 6
 
 function clientFor(ctx: SyncContext): MattermostClient {
   if (!ctx.service.baseUrl) throw new Error('Не задан адрес Mattermost')
@@ -76,13 +77,22 @@ export const mattermostConnector: Connector = {
         if (ch.type === 'D') ch.name.split('__').forEach((id) => userIds.add(id))
       }
 
-      for (const ch of interesting) {
-        const m = memberBy.get(ch.id)!
-        if (m.mention_count === 0 && ch.type !== 'D') continue
-        const list = await api.postsSince(ch.id, Math.max(m.last_viewed_at, since))
-        const posts = list.order.map((id) => list.posts[id]).filter(Boolean)
-        postsByChannel.set(ch.id, posts)
-        posts.forEach((p) => userIds.add(p.user_id))
+      const channelsToFetch = interesting.filter((ch) => {
+        const member = memberBy.get(ch.id)!
+        return member.mention_count > 0 || ch.type === 'D'
+      })
+      // Большие рабочие пространства раньше опрашивались строго последовательно.
+      // Небольшой лимит заметно сокращает sync, не устраивая всплеск запросов к API.
+      for (let i = 0; i < channelsToFetch.length; i += CHANNEL_FETCH_CONCURRENCY) {
+        await Promise.all(
+          channelsToFetch.slice(i, i + CHANNEL_FETCH_CONCURRENCY).map(async (ch) => {
+            const member = memberBy.get(ch.id)!
+            const list = await api.postsSince(ch.id, Math.max(member.last_viewed_at, since))
+            const posts = list.order.map((id) => list.posts[id]).filter(Boolean)
+            postsByChannel.set(ch.id, posts)
+            posts.forEach((post) => userIds.add(post.user_id))
+          })
+        )
       }
 
       const users = new Map<string, MmUser>(

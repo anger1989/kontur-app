@@ -20,5 +20,3 @@ const CONNECTORS: Partial<Record<ServiceKind, Connector>> = {
 export function connectorFor(kind: ServiceKind): Connector | undefined {
   return CONNECTORS[kind]
 }
-
-export const hasConnector = (kind: ServiceKind): boolean => Boolean(CONNECTORS[kind])

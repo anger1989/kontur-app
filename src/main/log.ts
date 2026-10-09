@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { appendFile, readFile } from 'node:fs/promises'
+import { appendFile, open, rename, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /**
@@ -9,6 +9,10 @@ import { join } from 'node:path'
 export type LogLevel = 'info' | 'warn' | 'error'
 
 let logPath: string | null = null
+const MAX_LOG_BYTES = 2 * 1024 * 1024
+const LOG_CHECK_EVERY = 50
+let writesSinceSizeCheck = LOG_CHECK_EVERY
+let writeQueue: Promise<void> = Promise.resolve()
 function path(): string {
   if (!logPath) logPath = join(app.getPath('userData'), 'kontur.log')
   return logPath
@@ -23,8 +27,25 @@ export function log(level: LogLevel, scope: string, message: string): void {
   if (level === 'error') console.error(line)
   else if (level === 'warn') console.warn(line)
   else console.log(line)
-  // Пишем без ожидания: лог не должен тормозить работу и не должен падать.
-  appendFile(path(), line + '\n').catch(() => {})
+  // Сериализуем запись, чтобы параллельные append/rotation не перетирали друг
+  // друга. Очередь не ожидается вызывающим кодом и никогда не выбрасывает.
+  writeQueue = writeQueue
+    .then(async () => {
+      writesSinceSizeCheck += 1
+      if (writesSinceSizeCheck >= LOG_CHECK_EVERY) {
+        writesSinceSizeCheck = 0
+        try {
+          const info = await stat(path())
+          if (info.size >= MAX_LOG_BYTES) {
+            await rename(path(), `${path()}.old`).catch(() => {})
+          }
+        } catch {
+          // Файла ещё нет — append создаст его ниже.
+        }
+      }
+      await appendFile(path(), line + '\n')
+    })
+    .catch(() => {})
 }
 
 export const logInfo = (scope: string, m: string): void => log('info', scope, m)
@@ -33,12 +54,20 @@ export const logError = (scope: string, m: string): void => log('error', scope, 
 
 /** Последние строки лога для просмотра в интерфейсе. */
 export async function tailLog(lines = 300): Promise<string> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null
   try {
-    const text = await readFile(path(), 'utf8')
+    handle = await open(path(), 'r')
+    const info = await handle.stat()
+    const length = Math.min(info.size, MAX_LOG_BYTES)
+    const buffer = Buffer.alloc(length)
+    await handle.read(buffer, 0, length, Math.max(0, info.size - length))
+    const text = buffer.toString('utf8')
     const all = text.split('\n')
     return all.slice(-lines).join('\n')
   } catch {
     return 'Лог пока пуст.'
+  } finally {
+    await handle?.close().catch(() => {})
   }
 }
 

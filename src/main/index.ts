@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, nativeTheme } from 'electron'
 import { join } from 'node:path'
 import { CH } from '@shared/ipc'
 import { getConfig } from './config/store'
@@ -19,6 +19,7 @@ import { killAllPtys } from './terminal/pty'
 import { startKeyboardLayoutWatch, stopKeyboardLayoutWatch } from './keyboardLayout'
 import { ServiceViewManager } from './views/serviceViews'
 import { resolveExternalLink } from './views/externalLink'
+import { openSafeExternal } from './security/externalOpen'
 
 let win: BrowserWindow | null = null
 let views: ServiceViewManager | null = null
@@ -56,7 +57,7 @@ function createWindow(): void {
     const target = resolveExternalLink(getConfig(), sourceServiceId, url)
     if (target.kind === 'ignore') return
     if (target.kind === 'system') {
-      void shell.openExternal(target.url)
+      void openSafeExternal(target.url)
       return
     }
     // Посторонний сайт забирает встроенный браузер — в контуре источника,
@@ -123,7 +124,7 @@ function createWindow(): void {
 
   // Сам UI никуда не навигирует: внешние ссылки уходят в системный браузер.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    void openSafeExternal(url).catch(() => {})
     return { action: 'deny' }
   })
 

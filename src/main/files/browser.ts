@@ -98,11 +98,4 @@ export async function trash(p: string): Promise<void> {
   await shell.trashItem(resolvePath(p))
 }
 
-export function parentDir(p: string): string | null {
-  const full = resolvePath(p)
-  const parent = dirname(full)
-  if (parent === full) return null
-  return parent
-}
-
 export { basename }

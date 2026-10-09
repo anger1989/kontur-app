@@ -1,10 +1,7 @@
 import {
   useEffect,
   useState,
-  type ElementType,
-  type JSX,
-  type MouseEvent,
-  type ReactNode
+  type JSX
 } from 'react'
 import { motion } from 'motion/react'
 import { cn } from '@/lib/utils'
@@ -113,48 +110,5 @@ export function HoverBorderRing({
       animate={{ background: active ? [MOVING[direction], HIGHLIGHT, MOVING[direction]] : MOVING[direction] }}
       transition={{ ease: 'linear', duration }}
     />
-  )
-}
-
-/**
- * Компонент в API оригинала — для мест, где нужен отдельный элемент с рамкой,
- * а не ui/button.
- */
-export function HoverBorderGradient({
-  children,
-  containerClassName,
-  className,
-  as: Tag = 'button',
-  duration = 1,
-  clockwise = true,
-  ...props
-}: {
-  children?: ReactNode
-  as?: ElementType
-  containerClassName?: string
-  className?: string
-  duration?: number
-  clockwise?: boolean
-} & React.HTMLAttributes<HTMLElement>): JSX.Element {
-  const [hovered, setHovered] = useState(false)
-
-  return (
-    <Tag
-      {...props}
-      onMouseEnter={(e: MouseEvent<HTMLElement>) => {
-        setHovered(true)
-        props.onMouseEnter?.(e)
-      }}
-      onMouseLeave={(e: MouseEvent<HTMLElement>) => {
-        setHovered(false)
-        props.onMouseLeave?.(e)
-      }}
-      className={cn('relative inline-flex w-fit items-center justify-center rounded-md', containerClassName)}
-    >
-      <span className={cn('relative inline-flex items-center justify-center rounded-[inherit]', className)}>
-        {children}
-      </span>
-      <HoverBorderRing active={hovered} duration={duration} clockwise={clockwise} />
-    </Tag>
   )
 }

@@ -129,6 +129,38 @@ function ipcErr(e: unknown): string {
 }
 
 /**
+ * Некоторые Exchange/EAS-серверы возвращают числовые HTML-сущности даже в
+ * plain-text полях. React экранирует их повторно, поэтому без декодирования в
+ * списке видны строки вроде `&#1084;` вместо кириллицы.
+ */
+function decodeMailText(text: string): string {
+  if (!text.includes('&')) return text
+  const textarea = document.createElement('textarea')
+  textarea.innerHTML = text
+  return textarea.value
+}
+
+function normalizeMailItem(item: Item): Item {
+  return {
+    ...item,
+    title: decodeMailText(item.title),
+    author: item.author ? decodeMailText(item.author) : item.author,
+    body: decodeMailText(item.body)
+  }
+}
+
+function normalizeMailDetail(detail: MailDetail): MailDetail {
+  return {
+    ...detail,
+    subject: decodeMailText(detail.subject),
+    from: decodeMailText(detail.from),
+    to: decodeMailText(detail.to),
+    cc: decodeMailText(detail.cc),
+    bodyText: decodeMailText(detail.bodyText)
+  }
+}
+
+/**
  * Полноценный почтовый клиент: список слева (поиск + фильтры + пагинация),
  * письмо справа, ответ. Контур — цветной полоской.
  */
@@ -174,7 +206,7 @@ export function Mail({
   const reload = (): void => {
     // 2500 — с запасом под расширенный синк (до ~1200 входящих × 2 контура + Sent/Drafts).
     void window.kontur.items.query({ kinds: ['mail'], limit: 2500 }).then((list) => {
-      setItems(list)
+      setItems(list.map(normalizeMailItem))
     })
   }
 
@@ -268,7 +300,7 @@ export function Mail({
     setDetail(null)
     try {
       const d = await window.kontur.mail.get(id)
-      setDetail(d)
+      setDetail(normalizeMailDetail(d))
       setItems((prev) =>
         prev.map((it) => (it.id === id ? { ...it, unread: false, state: 'прочитано' } : it))
       )

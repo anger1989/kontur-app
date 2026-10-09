@@ -185,8 +185,10 @@ class HealthMonitor extends EventEmitter {
   private async hit(env: NonNullable<ReturnType<typeof getConfig>['envs'][number]>, url: string): Promise<void> {
     const ses = session.fromPartition(env.partition)
     // Как у WebContentsView: иначе проба падает на TLS, а вкладка (уже с proc) — нет.
-    if (env.caCertPath || env.allowInsecureTls) {
+    if (env.allowInsecureTls) {
       ses.setCertificateVerifyProc((_request, callback) => callback(0))
+    } else {
+      ses.setCertificateVerifyProc(null)
     }
     const ac = new AbortController()
     const timer = setTimeout(() => ac.abort(), PROBE_TIMEOUT_MS)

@@ -707,10 +707,6 @@ export async function mattermostRead(
   }
 }
 
-export function enabledKinds(): string[] {
-  return [...new Set(getConfig().services.filter((s) => s.enabled).map((s) => s.kind))]
-}
-
 /* ── Календарь (EAS) ─────────────────────────────────────────────── */
 
 function parseIso(s: string, label: string): number {

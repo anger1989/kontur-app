@@ -318,10 +318,6 @@ export function upsertEnv(env: EnvConfig): AppConfig {
   return saveConfig({ ...cfg, envs })
 }
 
-export function getService(id: string): ServiceConfig | undefined {
-  return getConfig().services.find((s) => s.id === id)
-}
-
 export function getEnv(id: string): EnvConfig | undefined {
   return getConfig().envs.find((e) => e.id === id)
 }

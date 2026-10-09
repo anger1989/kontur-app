@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import { motion } from 'motion/react'
 import {
   ArrowLeft,
@@ -17,20 +17,21 @@ import { Button } from '@/components/ui/button'
 import { clampServiceRect, isOccludedByHigher, maximizedRect } from '@/lib/deskLayout'
 import { ServiceIcon } from './ServiceIcon'
 import { ServiceHost } from './ServiceHost'
-import { Today } from '@/pages/Today'
-import { Mail } from '@/pages/Mail'
-import { Calendar } from '@/pages/Calendar'
-import { Tasks } from '@/pages/Tasks'
-import { Search } from '@/pages/Search'
-import { Notes } from '@/pages/Notes'
-import { Files } from '@/pages/Files'
-import { Bookmarks } from '@/pages/Bookmarks'
-import { Browser } from '@/pages/Browser'
-import { Planner } from '@/pages/Planner'
-import { Settings } from '@/pages/Settings'
-import { TerminalPage } from '@/pages/Terminal'
-import { AssistantPage } from '@/pages/Assistant'
 import { cn } from '@/lib/utils'
+
+const Today = lazy(() => import('@/pages/Today').then((m) => ({ default: m.Today })))
+const Mail = lazy(() => import('@/pages/Mail').then((m) => ({ default: m.Mail })))
+const Calendar = lazy(() => import('@/pages/Calendar').then((m) => ({ default: m.Calendar })))
+const Tasks = lazy(() => import('@/pages/Tasks').then((m) => ({ default: m.Tasks })))
+const Search = lazy(() => import('@/pages/Search').then((m) => ({ default: m.Search })))
+const Notes = lazy(() => import('@/pages/Notes').then((m) => ({ default: m.Notes })))
+const Files = lazy(() => import('@/pages/Files').then((m) => ({ default: m.Files })))
+const Bookmarks = lazy(() => import('@/pages/Bookmarks').then((m) => ({ default: m.Bookmarks })))
+const Browser = lazy(() => import('@/pages/Browser').then((m) => ({ default: m.Browser })))
+const Planner = lazy(() => import('@/pages/Planner').then((m) => ({ default: m.Planner })))
+const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })))
+const TerminalPage = lazy(() => import('@/pages/Terminal').then((m) => ({ default: m.TerminalPage })))
+const AssistantPage = lazy(() => import('@/pages/Assistant').then((m) => ({ default: m.AssistantPage })))
 
 const MIN_WIDTH = 420
 const MIN_HEIGHT = 280
@@ -190,6 +191,7 @@ export function Window({
 
   const dockX = Math.round(desktopSize.width / 2 - 24)
   const dockY = Math.round(desktopSize.height - 52)
+  const minimizeTarget = win.widgetOrigin ?? { x: dockX, y: dockY, width: 48, height: 48 }
 
   const onTitlePointerDown = (e: ReactPointerEvent): void => {
     if (e.button !== 0 || genieOut) return
@@ -281,7 +283,17 @@ export function Window({
       )}
       style={{ zIndex }}
       initial={
-        win.fromDock
+        win.widgetOrigin
+          ? {
+              left: win.widgetOrigin.x,
+              top: win.widgetOrigin.y,
+              width: win.widgetOrigin.width,
+              height: win.widgetOrigin.height,
+              opacity: 0.72,
+              scale: 0.96,
+              borderRadius: 16
+            }
+          : win.fromDock
           ? {
               left: dockX,
               top: dockY,
@@ -296,13 +308,13 @@ export function Window({
       animate={
         genieOut
           ? {
-              left: dockX,
-              top: dockY,
-              width: 48,
-              height: 48,
+              left: minimizeTarget.x,
+              top: minimizeTarget.y,
+              width: minimizeTarget.width,
+              height: minimizeTarget.height,
               opacity: 0,
-              scale: 0.12,
-              borderRadius: 22
+              scale: win.widgetOrigin ? 0.96 : 0.12,
+              borderRadius: win.widgetOrigin ? 16 : 22
             }
           : {
               left: win.x,
@@ -343,7 +355,7 @@ export function Window({
       >
       <div
         className={cn(
-          'no-drag relative flex h-9 shrink-0 items-center gap-2 border-b border-white/10 bg-muted/40 px-3',
+          'no-drag relative flex h-9 w-full shrink-0 items-center gap-2 border-b border-white/10 bg-muted/40 px-3',
           peekMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
         )}
         onPointerDown={onTitlePointerDown}
@@ -383,18 +395,17 @@ export function Window({
         </div>
 
         {isService && (
-          <span className="size-2 shrink-0 rounded-full" style={{ background: env?.accent }} />
+          <div
+            className="ml-0.5 flex shrink-0 items-center gap-1.5"
+            title={env?.name}
+            aria-label={env ? `Контур: ${env.name}` : undefined}
+          >
+            <span className="size-2 rounded-full" style={{ background: env?.accent }} />
+            <ServiceIcon serviceId={service?.id ?? ''} kind={service?.kind ?? ''} size={14} />
+          </div>
         )}
-        {isService && <ServiceIcon serviceId={service?.id ?? ''} kind={service?.kind ?? ''} size={14} />}
-        {isService && viewLoading && (
-          <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" aria-hidden />
-        )}
-        <span className="min-w-0 flex-1 truncate text-center text-[12px] font-medium select-none">
-          {title}
-        </span>
-
         {isService && service && (
-          <div className="flex shrink-0 items-center gap-0.5">
+          <div className="ml-1 flex shrink-0 items-center gap-0.5 border-l border-white/10 pl-1">
             <Button
               type="button"
               size="icon-xs"
@@ -468,6 +479,9 @@ export function Window({
             </Button>
           </div>
         )}
+        <span className="pointer-events-none absolute left-1/2 max-w-[40%] -translate-x-1/2 truncate text-center text-[12px] font-medium select-none">
+          {title}
+        </span>
         {/* Полоска прогресса под titlebar — WebContentsView рисуется ниже и её не кроет. */}
         {isService && viewLoading && (
           <div
@@ -497,15 +511,25 @@ export function Window({
           !win.maximized && !isBrowser && 'pr-2 pb-2'
         )}
       >
-        {isBrowser ? (
-          <Browser
-            frozen={occluded}
-            maximized={win.maximized}
-            focused={isTop}
-            rect={`${win.x},${win.y},${win.width},${win.height}`}
-          />
-        ) : win.route.kind === 'page' ? (
-          <PageContent win={win} />
+        {isBrowser || win.route.kind === 'page' ? (
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" aria-label="Загрузка" />
+              </div>
+            }
+          >
+            {isBrowser ? (
+              <Browser
+                frozen={occluded}
+                maximized={win.maximized}
+                focused={isTop}
+                rect={`${win.x},${win.y},${win.width},${win.height}`}
+              />
+            ) : (
+              <PageContent win={win} />
+            )}
+          </Suspense>
         ) : showServiceHost ? (
           <ServiceHost
             serviceId={win.route.serviceId}

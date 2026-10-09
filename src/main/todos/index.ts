@@ -53,10 +53,6 @@ export function todoRemindAt(it: Item): number | null {
   return parseMeta(it.body).remind
 }
 
-export function todoShowInCalendar(it: Item): boolean {
-  return parseMeta(it.body).cal && it.startsAt != null
-}
-
 export function listTodos(): Item[] {
   return queryItems({ kinds: ['todo'], limit: 2000, mode: 'full' }).sort((a, b) => {
     const ad = isTodoDone(a) ? 1 : 0

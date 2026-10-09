@@ -1,6 +1,6 @@
-import { createContext, useContext, useState, type Dispatch, type JSX, type ReactNode, type SetStateAction } from 'react'
+import { createContext, useContext, useMemo, useState, type Dispatch, type JSX, type ReactNode, type SetStateAction } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { IconMenu2, IconX } from '@tabler/icons-react'
+import { Menu, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface SidebarContextProps {
@@ -31,9 +31,10 @@ export function SidebarProvider({
   const [openState, setOpenState] = useState(false)
   const open = openProp !== undefined ? openProp : openState
   const setOpen = setOpenProp !== undefined ? setOpenProp : setOpenState
+  const value = useMemo(() => ({ open, setOpen, animate }), [open, setOpen, animate])
 
   return (
-    <SidebarContext.Provider value={{ open, setOpen, animate }}>
+    <SidebarContext.Provider value={value}>
       {children}
     </SidebarContext.Provider>
   )
@@ -103,7 +104,7 @@ export function MobileSidebar({
         {...props}
       >
         <div className="z-20 flex w-full justify-end">
-          <IconMenu2
+          <Menu
             className="cursor-pointer text-neutral-800 dark:text-neutral-200"
             onClick={() => setOpen(!open)}
           />
@@ -124,7 +125,7 @@ export function MobileSidebar({
                 className="absolute top-8 right-8 z-50 cursor-pointer text-neutral-800 dark:text-neutral-200"
                 onClick={() => setOpen(false)}
               >
-                <IconX />
+                <X />
               </div>
               {children}
             </motion.div>

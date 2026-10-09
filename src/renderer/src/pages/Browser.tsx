@@ -355,6 +355,7 @@ export function Browser({
           )}
           <input
             ref={addressRef}
+            aria-label="Адрес или поиск"
             value={draft}
             disabled={!activeId}
             spellCheck={false}

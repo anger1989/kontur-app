@@ -301,20 +301,6 @@ export function defaultConfig(): AppConfig {
   }
 }
 
-/** Человекочитаемые подписи для UI настроек. */
-export const SERVICE_LABELS: Record<ServiceKind, string> = {
-  jira: 'Jira',
-  confluence: 'Confluence',
-  gitlab: 'GitLab',
-  bitbucket: 'Bitbucket',
-  mattermost: 'Mattermost',
-  achat: 'А-чат',
-  ktalk: 'Толк',
-  mail: 'Почта и календарь',
-  calendar: 'Календарь',
-  custom: 'Другой сервис'
-}
-
 export const AUTH_LABELS: Record<string, string> = {
   none: 'Без авторизации',
   pat: 'Персональный токен',

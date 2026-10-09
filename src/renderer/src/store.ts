@@ -57,6 +57,8 @@ export interface DeskWindow {
   restoreRect?: { x: number; y: number; width: number; height: number }
   /** Только что сняли minimize — анимация появления из дока. */
   fromDock?: boolean
+  /** Карточка, из которой окно ассистента отделилось и куда сворачивается. */
+  widgetOrigin?: { x: number; y: number; width: number; height: number }
 }
 
 export const PAGE_TITLES: Record<AppPage, string> = {
@@ -144,8 +146,11 @@ interface State {
    * повторный вызов возвращает снимок.
    */
   peekDesktop: (desktopSize: { width: number; height: number }) => void
-  /** Открыть раздел/сервис окном. Если такое окно уже есть — просто поднять его. */
-  openWindow: (route: Route) => void
+  /** Открыть раздел/сервис окном. origin анимирует отделение из виджета. */
+  openWindow: (
+    route: Route,
+    origin?: { x: number; y: number; width: number; height: number }
+  ) => void
   closeWindow: (id: string) => void
   /** Поднять окно наверх (и снять минимизацию, если была). */
   focusWindow: (id: string) => void
@@ -770,7 +775,7 @@ export const useStore = create<State>((set, get) => ({
     if (firstBoot) restoreSessionWindows(set, get)
   },
 
-  openWindow: (route) => {
+  openWindow: (route, origin) => {
     // Новое окно / поднятие из дока — сначала выходим из Exposé, иначе снимок ломается.
     restoreFromArrange(set, get)
 
@@ -801,7 +806,14 @@ export const useStore = create<State>((set, get) => ({
       set({
         windows: get().windows.map((w) =>
           w.id === existing.id
-            ? { ...w, route, minimized: false, z, fromDock: fromDock || undefined }
+            ? {
+                ...w,
+                route,
+                minimized: false,
+                z,
+                fromDock: origin ? undefined : fromDock || undefined,
+                widgetOrigin: origin ?? w.widgetOrigin
+              }
             : w
         ),
         windowSeq: z
@@ -815,7 +827,8 @@ export const useStore = create<State>((set, get) => ({
         ...DEFAULT_WIN_SIZE,
         z,
         minimized: false,
-        maximized: false
+        maximized: false,
+        widgetOrigin: origin
       }
       set({ windows: [...get().windows, win], windowSeq: z })
     }
@@ -1053,9 +1066,4 @@ if (typeof window !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flush()
   })
-}
-
-/** Цвет контура, которому принадлежит сервис. */
-export function accentOf(config: AppConfig | null, envId: string): string {
-  return config?.envs.find((e) => e.id === envId)?.accent ?? 'var(--focus)'
 }

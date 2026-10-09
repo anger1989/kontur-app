@@ -7,7 +7,6 @@ import {
   ListTodo,
   Mail,
   NotebookPen,
-  Sparkles,
   TerminalSquare,
   type LucideIcon
 } from 'lucide-react'
@@ -93,7 +92,6 @@ export function Dock(): JSX.Element {
       | 'browser'
       | 'settings'
       | 'terminal'
-      | 'assistant'
   ): Route => ({
     kind: 'page',
     page: p
@@ -171,13 +169,6 @@ export function Dock(): JSX.Element {
       open: isOpen(page('terminal')),
       focused: isFocused(page('terminal')),
       onClick: () => openWindow(page('terminal'))
-    },
-    {
-      title: 'Ассистент',
-      icon: <Sparkles className="h-full w-full text-neutral-700 dark:text-white/95" />,
-      open: isOpen(page('assistant')),
-      focused: isFocused(page('assistant')),
-      onClick: () => openWindow(page('assistant'))
     },
     // Общие сервисы (Mattermost, Толк…) — порядок как в настройках (`order`).
     ...(() => {

@@ -322,13 +322,3 @@ export async function snxDisconnect(envId: string): Promise<void> {
     }
   }
 }
-
-export function snxVendorNotice(): string {
-  return [
-    `snx-rs ${SNX_TAG}`,
-    'https://github.com/ancwrd1/snx-rs',
-    'License: GNU Affero General Public License v3.0',
-    'Bundled as an unmodified upstream binary; Kontur invokes it as a subprocess.',
-    'On macOS a system LaunchDaemon from the official SNX-RS.pkg is required for tunnels.'
-  ].join('\n')
-}
