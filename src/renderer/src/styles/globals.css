@@ -161,23 +161,6 @@
     0 0 0 1px rgb(0 0 0 / 0.3);
 }
 
-/* «Требует внимания»: фильтрация не размонтирует длинный список. Благодаря
-   content-visibility Chromium также не тратит layout/paint на строки далеко
-   за пределами небольшой области прокрутки виджета. */
-.attention-list[data-attention-filter='task']
-  .attention-list-item:not([data-attention-kind='task']),
-.attention-list[data-attention-filter='mail']
-  .attention-list-item:not([data-attention-kind='mail']),
-.attention-list[data-attention-filter='note']
-  .attention-list-item:not([data-attention-kind='note']) {
-  display: none;
-}
-
-.attention-list-item {
-  content-visibility: auto;
-  contain-intrinsic-size: 56px;
-}
-
 .dark {
   /* darkChrome: page/canvas graphite, nav #1d2027, amber #f09a05 */
   --background: #13161c;
