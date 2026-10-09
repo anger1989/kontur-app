@@ -35,12 +35,21 @@ interface Session {
   /** Сырой вывод для replay при повторном attach. */
   scrollback: string
   label: string
+  /** Резолвится на onExit — нужно дождаться перед FreeEnvironment. */
+  exited: Promise<void>
+  resolveExit: () => void
 }
 
 const sessions = new Map<string, Session>()
 /** key → session id */
 const byKey = new Map<string, string>()
 let seq = 0
+/**
+ * Quit in progress: не шлём IPC и не трогаем JS из onData.
+ * Иначе node-pty ThreadSafeFunction → ThrowAsJavaScriptException → SIGABRT
+ * в FreeEnvironment (microsoft/node-pty#904).
+ */
+let shuttingDown = false
 
 /** node-pty 1.1+ иногда кладёт spawn-helper без +x — без этого posix_spawnp падает. */
 function ensureSpawnHelperExecutable(): void {
@@ -126,8 +135,13 @@ function appendScrollback(s: Session, chunk: string): void {
 }
 
 function send(win: BrowserWindow | null, channel: string, ...args: unknown[]): void {
-  if (!win || win.isDestroyed()) return
-  win.webContents.send(channel, ...args)
+  if (shuttingDown || !win || win.isDestroyed()) return
+  try {
+    if (win.webContents.isDestroyed()) return
+    win.webContents.send(channel, ...args)
+  } catch {
+    /* окно уже рвётся при quit */
+  }
 }
 
 export type PtyCreateResult = {
@@ -214,20 +228,28 @@ export function createPtySession(
     throw new Error(`Не удалось запустить ${label}: ${msg}`)
   }
 
-  const session: Session = { id, key, proc, scrollback: '', label }
+  let resolveExit!: () => void
+  const exited = new Promise<void>((resolve) => {
+    resolveExit = resolve
+  })
+  const session: Session = { id, key, proc, scrollback: '', label, exited, resolveExit }
   sessions.set(id, session)
   if (key) byKey.set(key, id)
   logInfo('terminal', `сессия ${id}${key ? ` [${key}]` : ''} → ${file} cwd=${cwd} ${cols}x${rows}`)
 
   proc.onData((data) => {
+    if (shuttingDown) return
     appendScrollback(session, data)
     send(getWin(), CH.terminalData, id, data)
   })
   proc.onExit(({ exitCode, signal }) => {
     sessions.delete(id)
     if (key && byKey.get(key) === id) byKey.delete(key)
-    logInfo('terminal', `сессия ${id} завершилась code=${exitCode} signal=${signal ?? ''}`)
-    send(getWin(), CH.terminalExit, id, { exitCode, signal: signal ?? null })
+    if (!shuttingDown) {
+      logInfo('terminal', `сессия ${id} завершилась code=${exitCode} signal=${signal ?? ''}`)
+      send(getWin(), CH.terminalExit, id, { exitCode, signal: signal ?? null })
+    }
+    session.resolveExit()
   })
 
   return { id, shell: label, scrollback: '', reused: false }
@@ -257,10 +279,34 @@ export function killPty(id: string): void {
   try {
     s.proc.kill()
   } catch {
-    /* already dead */
+    /* already dead — onExit мог не прийти */
+    s.resolveExit()
   }
 }
 
 export function killAllPtys(): void {
   for (const id of [...sessions.keys()]) killPty(id)
+}
+
+/**
+ * Убить все PTY и дождаться onExit (с таймаутом), чтобы ThreadSafeFunction
+ * node-pty успел сняться до FreeEnvironment — иначе SIGABRT на quit.
+ */
+export async function disposeAllPtys(timeoutMs = 1500): Promise<void> {
+  shuttingDown = true
+  const pending = [...sessions.values()].map((s) => s.exited)
+  for (const s of [...sessions.values()]) {
+    try {
+      s.proc.kill()
+    } catch {
+      s.resolveExit()
+    }
+  }
+  sessions.clear()
+  byKey.clear()
+  if (!pending.length) return
+  await Promise.race([
+    Promise.allSettled(pending).then(() => undefined),
+    new Promise<void>((r) => setTimeout(r, timeoutMs))
+  ])
 }

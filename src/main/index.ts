@@ -15,7 +15,7 @@ import { startMeetingReminders, stopMeetingReminders } from './notify/reminders'
 import { startAutomations, stopAutomations } from './automations'
 import { ensureVault } from './notes/vault'
 import { registerIpc } from './ipc'
-import { killAllPtys } from './terminal/pty'
+import { disposeAllPtys } from './terminal/pty'
 import { startKeyboardLayoutWatch, stopKeyboardLayoutWatch } from './keyboardLayout'
 import { ServiceViewManager } from './views/serviceViews'
 import { resolveExternalLink } from './views/externalLink'
@@ -251,8 +251,9 @@ app.on('before-quit', (e) => {
   e.preventDefault()
   shuttingDown = true
 
-  // Hang report: FreeEnvironment → CleanupHandles → uv_run/kevent.
-  // MCP keep-alive и undici-агенты держали libuv handles — рвём явно, с таймаутом.
+  // Hang/crash: FreeEnvironment → CleanupHandles. node-pty TSFN на живых
+  // сессиях → ThrowAsJavaScriptException → SIGABRT (node-pty#904). Сначала
+  // await dispose PTY, потом рвём MCP/undici handles.
   void (async () => {
     scheduler.stop()
     stopAutomations()
@@ -261,11 +262,15 @@ app.on('before-quit', (e) => {
     destroyTray()
     views?.disposeAll()
     views = null
-    killAllPtys()
     stopKeyboardLayoutWatch()
     await Promise.race([
-      Promise.all([stopMcp(), closeTransports(), closeEasAgents()]),
-      new Promise<void>((r) => setTimeout(r, 2000))
+      Promise.all([
+        disposeAllPtys(1500),
+        stopMcp(),
+        closeTransports(),
+        closeEasAgents()
+      ]),
+      new Promise<void>((r) => setTimeout(r, 2500))
     ])
     closeDb()
     app.exit(0)
