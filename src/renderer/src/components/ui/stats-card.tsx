@@ -179,7 +179,7 @@ function LineChart({
           className="stroke-border"
           strokeWidth={1}
         />
-        <motion.polygon points={area} variants={areaVariants} className="fill-primary/15" />
+        <motion.polygon points={area} variants={areaVariants} className="fill-brand/15" />
         <motion.polyline
           points={polyline}
           variants={strokeVariants}
@@ -187,7 +187,7 @@ function LineChart({
           strokeWidth={2}
           strokeLinejoin="round"
           strokeLinecap="round"
-          className="stroke-primary"
+          className="stroke-brand"
         />
         {pts.map(([x, y], i) => {
           const d = data[i]!
@@ -247,7 +247,7 @@ export function StatsCard({
   bare,
   className,
   defaultBarColor = 'bg-foreground/15',
-  highlightedBarColor = 'bg-primary'
+  highlightedBarColor = 'bg-brand'
 }: StatsCardProps): JSX.Element {
   const bodyRef = useRef<HTMLDivElement>(null)
   const inView = useInView(bodyRef, { once: true, amount: 0.4 })
@@ -277,7 +277,7 @@ export function StatsCard({
         <motion.div initial="hidden" animate={controls} variants={lineVariants}>
           <LineChart
             data={chartData}
-            accentClass="fill-primary"
+            accentClass="fill-brand"
             mutedClass="fill-muted-foreground/40"
           />
         </motion.div>

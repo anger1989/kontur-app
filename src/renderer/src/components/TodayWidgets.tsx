@@ -30,8 +30,8 @@ import { TodayMeetingsCarousel } from './TodayMeetingsCarousel'
 import { TodosWidget } from './TodosWidget'
 import { AssistantWidget } from './AssistantWidget'
 import { AutomationsWidget } from './AutomationsWidget'
-import { GlowingEffect } from '@/components/ui/glowing-effect'
 import { AnimatedList } from '@/components/ui/animated-list'
+import { GlowingEffect } from '@/components/ui/glowing-effect'
 import { WidgetHeader } from '@/components/ui/stats-card'
 import { DOCK_CLEARANCE } from '@/lib/deskLayout'
 import { toast } from '@/components/ui/toast'
@@ -40,11 +40,11 @@ import { cn } from '@/lib/utils'
 
 /** Акцент иконки карточки внимания — по виду элемента. */
 const KIND_COLOR: Record<string, string> = {
-  task: '#f09a05',
-  review: '#3b82f6',
-  message: '#10b981',
-  mail: '#f09a05',
-  page: '#8b94a3'
+  task: '#525252',
+  review: '#737373',
+  message: '#525252',
+  mail: '#737373',
+  page: '#737373'
 }
 
 const KIND_ICON: Record<string, LucideIcon> = {
@@ -85,8 +85,8 @@ function Glass({
   return (
     <div
       className={cn(
-        'desktop-glass rounded-2xl border',
-        !noBlur && 'backdrop-blur-2xl',
+        'desktop-glass rounded-xl border',
+        !noBlur && 'backdrop-blur-xl',
         className
       )}
     >
@@ -95,18 +95,7 @@ function Glass({
   )
 }
 
-/**
- * Подсвечивающаяся рамка у курсора (Aceternity Glowing Effect) вокруг виджета.
- * Виджеты стоят в вертикальный стек (друг под другом), высота — по контенту.
- *
- * Glow обязан быть выше Glass (z-10): иначе непрозрачный фон карточки
- * полностью перекрывает 1.5px border-маску эффекта. overflow-hidden тут
- * нельзя — ::after вылезает на ширину borderWidth наружу.
- *
- * Glow всегда включён: GlowingEffect сам гасит рамку, если курсор над
- * desk-window (elementFromPoint + hit-test по прямоугольникам). При открытых
- * окнах только снимаем backdrop-blur у стекла — альфа не меняется.
- */
+/** Стеклянная оболочка виджета с локальным amber-glow по положению курсора. */
 function GlowCell({
   className,
   style,
@@ -131,7 +120,7 @@ function GlowCell({
     <div
       data-widget={widgetId}
       data-widget-card
-      className={cn('group/widget relative rounded-2xl', className)}
+      className={cn('group/widget relative rounded-xl', className)}
       style={style}
     >
       {/* Ручка и крестик — поверх карточки и только при наведении: внутри
@@ -160,17 +149,16 @@ function GlowCell({
           )}
         </div>
       )}
-      {/* inactiveZone по умолчанию 0.7 — свечение гасло почти везде, кроме
-          самого края карточки. Как в оригинальном демо — почти 0, чтобы
-          реагировало по всей площади. */}
       <GlowingEffect
         className="z-10"
         disabled={false}
         glow
-        proximity={64}
-        spread={40}
-        borderWidth={2}
-        inactiveZone={0.01}
+        variant="amber"
+        proximity={72}
+        spread={36}
+        borderWidth={1.5}
+        inactiveZone={0.05}
+        movementDuration={1.2}
       />
       <Glass className="relative" noBlur={deskBusy}>
         {children}
@@ -229,23 +217,19 @@ const AttentionListItem = memo(function AttentionListItem({
   onOpen: (item: Item) => void
 }): JSX.Element {
   const Icon = KIND_ICON[item.kind] ?? FileText
-  const tint = KIND_COLOR[item.kind] ?? '#64748b'
+  const tint = KIND_COLOR[item.kind] ?? '#737373'
 
   return (
     <button
       type="button"
       onClick={() => onOpen(item)}
       className={cn(
-        'relative flex w-full max-w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left',
-        'transition-colors duration-200 ease-out',
-        'bg-foreground/[0.03] hover:bg-foreground/[0.06]',
-        'dark:bg-white/[0.04] dark:hover:bg-white/[0.07]',
-        'dark:[box-shadow:0_-12px_40px_-16px_#ffffff14_inset] dark:backdrop-blur-md',
-        'border border-transparent dark:border-white/10'
+        'relative flex w-full max-w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-lg border border-border/70 bg-secondary/50 px-2.5 py-2 text-left',
+        'transition-colors duration-150 ease-out hover:bg-accent'
       )}
     >
       <span
-        className="flex size-8 shrink-0 items-center justify-center rounded-xl text-white"
+        className="flex size-8 shrink-0 items-center justify-center rounded-lg text-white shadow-xs"
         style={{ backgroundColor: tint }}
       >
         <Icon className="size-3.5" strokeWidth={2.25} />

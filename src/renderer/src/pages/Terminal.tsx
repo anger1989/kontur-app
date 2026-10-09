@@ -51,10 +51,10 @@ export function TerminalPage(): JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (!(e.metaKey || e.ctrlKey)) return
-      if (e.key === 't' || e.key === 'T') {
+      if (e.code === 'KeyT') {
         e.preventDefault()
         addTab()
-      } else if (e.key === 'w' || e.key === 'W') {
+      } else if (e.code === 'KeyW') {
         e.preventDefault()
         closeTab(activeIdRef.current)
       }

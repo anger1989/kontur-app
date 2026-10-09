@@ -602,8 +602,12 @@ export function LiveTerminal({
     const host = hostRef.current
     if (!host) return
 
+    const isAgent = profile === 'agent'
     const term = new XTerm({
-      cursorBlink: true,
+      // Agent TUI сам рисует caret в composer и шлёт CSI ?25l. Нативный
+      // курсор xterm при reuse/resize снова вспыхивает внизу под Auto/~ —
+      // прячем полностью (цвет = фон, без blink).
+      cursorBlink: !isAgent,
       cursorStyle: 'bar',
       // Canvas measureText не понимает var(--font-*) — иначе метрики ячейки
       // расходятся с отрисовкой и курсор agent'а уезжает от строки ввода.
@@ -618,11 +622,11 @@ export function LiveTerminal({
       allowTransparency: false,
       // FitAddon резервирует 14px под overview ruler при scrollback>0 —
       // для agent TUI скролл не нужен, лишний запас врёт cols.
-      scrollback: profile === 'agent' ? 0 : 1000,
+      scrollback: isAgent ? 0 : 1000,
       theme: {
         background: '#171717',
         foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
+        cursor: isAgent ? '#171717' : '#d4d4d4',
         cursorAccent: '#171717',
         selectionBackground: '#404040',
         black: '#171717',
@@ -696,7 +700,18 @@ export function LiveTerminal({
       sizeRef.current = { cols, rows }
       const id = sessionIdRef.current
       if (id) void window.kontur.terminal.resize(id, cols, rows)
-      term.scrollToBottom()
+      // Agent — alternate screen / полный кадр: scrollToBottom показывает «хвост»
+      // буфера и оставляет caret под статусом Auto/~.
+      if (!isAgent) term.scrollToBottom()
+    }
+
+    const hideAgentCursor = (): void => {
+      if (!isAgent || disposed) return
+      try {
+        term.write('\x1b[?25l')
+      } catch {
+        /* ignore */
+      }
     }
 
     const boot = async (): Promise<void> => {
@@ -709,7 +724,13 @@ export function LiveTerminal({
         }
         await waitForHostSize(host, ac.signal)
         if (disposed) return
-        syncSize(true)
+        // Ждём стабильный box (виджет flex сначала может быть ~40px).
+        for (let i = 0; i < 12 && !disposed; i++) {
+          syncSize(true)
+          if (host.clientHeight >= 80 && term.rows >= 4) break
+          await new Promise<void>((r) => requestAnimationFrame(() => r()))
+        }
+        if (disposed) return
         term.focus()
 
         // Перезапуск только если seq ещё не применяли (не на каждый remount).
@@ -741,28 +762,7 @@ export function LiveTerminal({
         setTitle(initial)
         onTitleRef.current?.(shellName)
 
-        // Сначала resize под хост — иначе replay/TUI рисуются в чужом 80×24.
-        syncSize(true)
-
-        // Agent TUI: replay ANSI со старым размером ломает курсор (виджет↔окно).
-        // Двойной SIGWINCH (rows±1) — иначе часть сборок agent не перерисовывает composer.
-        if (profile === 'agent' && session.reused) {
-          const id = session.id
-          const { cols, rows } = term
-          void window.kontur.terminal.resize(id, cols, Math.max(8, rows - 1)).then(() => {
-            if (!disposed) void window.kontur.terminal.resize(id, cols, rows)
-          })
-        } else if (session.scrollback) {
-          term.write(session.scrollback)
-          term.scrollToBottom()
-        }
-
-        term.onTitleChange((t) => {
-          const next = t.trim() || shellName
-          setTitle(next)
-          onTitleRef.current?.(next)
-        })
-
+        // Сразу подписка — иначе первые байты agent (?25l + кадр) уходят в никуда.
         offData = window.kontur.terminal.onData((id, data) => {
           if (id === session.id) term.write(data)
         })
@@ -775,16 +775,40 @@ export function LiveTerminal({
           sessionIdRef.current = null
           onExitRef.current?.(info)
         })
-
-        // Каждый кейстрок сразу в PTY — иначе raw-mode TUI (agent) не получает `a` до Enter.
         term.onData((data) => {
           const id = sessionIdRef.current
           if (id) void window.kontur.terminal.write(id, data)
         })
+        term.onTitleChange((t) => {
+          const next = t.trim() || shellName
+          setTitle(next)
+          onTitleRef.current?.(next)
+        })
 
-        // Повторный fit после layout (шрифты/паддинги).
+        syncSize(true)
+
+        // Agent TUI: replay ANSI со старым размером ломает кадр (виджет↔окно).
+        // SIGWINCH + явный ?25l — иначе после reuse снова виден caret внизу.
+        if (isAgent && session.reused) {
+          const id = session.id
+          const { cols, rows } = term
+          void window.kontur.terminal.resize(id, cols, Math.max(2, rows - 1)).then(() => {
+            if (disposed) return
+            void window.kontur.terminal.resize(id, cols, rows).then(() => hideAgentCursor())
+          })
+          hideAgentCursor()
+        } else if (session.scrollback) {
+          term.write(session.scrollback)
+          if (!isAgent) term.scrollToBottom()
+          else hideAgentCursor()
+        } else if (isAgent) {
+          hideAgentCursor()
+        }
+
         requestAnimationFrame(() => {
-          if (!disposed) syncSize(true)
+          if (disposed) return
+          syncSize(true)
+          hideAgentCursor()
         })
       } catch (e) {
         if (disposed || (e instanceof DOMException && e.name === 'AbortError')) return
@@ -848,13 +872,20 @@ export function LiveTerminal({
         sizeRef.current = { cols, rows }
         const id = sessionIdRef.current
         if (id) void window.kontur.terminal.resize(id, cols, rows)
-        term.scrollToBottom()
+        if (profile !== 'agent') term.scrollToBottom()
+        else {
+          try {
+            term.write('\x1b[?25l')
+          } catch {
+            /* ignore */
+          }
+        }
         term.focus()
       } catch {
         /* ignore */
       }
     })
-  }, [active])
+  }, [active, profile])
 
   return (
     <div
@@ -880,7 +911,9 @@ export function LiveTerminal({
           ref={hostRef}
           className={cn(
             'h-full min-h-0 w-full overflow-hidden',
-            profile !== 'agent' && '[&_.xterm-viewport]:!overflow-auto'
+            profile !== 'agent' && '[&_.xterm-viewport]:!overflow-auto',
+            // Agent прячет caret через CSI — на всякий случай гасим слой курсора CSS.
+            profile === 'agent' && '[&_.xterm-cursor-layer]:!opacity-0 [&_.xterm-cursor]:!opacity-0'
           )}
         />
       </div>

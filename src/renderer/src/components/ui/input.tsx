@@ -1,76 +1,35 @@
-import * as React from "react"
-import { cn } from "@/lib/utils"
-import { HoverBorderRing } from "@/components/ui/hover-border-gradient"
+import * as React from 'react'
+import { cn } from '@/lib/utils'
 
-/**
- * Классы, которые описывают место поля в раскладке, а не само поле: отступы,
- * flex/grid-участие, ширина, display. С обёрткой (её требует кольцо Hover Border
- * Gradient — у <input> не бывает детей) они должны жить на обёртке, иначе
- * `sm:flex-[2]` или `mt-2` перестанут действовать на flex-родителя.
- */
-const LAYOUT_RE =
-  /^-?(m[trblxyse]?-|w-|min-w-|max-w-|flex-|grow|shrink|basis-|self-|order-|col-|row-|justify-self-|place-self-|hidden$|block$|inline-block$)/
-
-export function splitLayoutClasses(className?: string): { wrapper: string; own: string } {
-  const wrapper: string[] = []
-  const own: string[] = []
-  for (const token of (className ?? "").split(/\s+/).filter(Boolean)) {
-    // `sm:hover:mt-2` → смотрим на саму утилиту после вариантов; `!` — important.
-    const base = token.split(":").pop()!.replace(/^!/, "")
-    if (LAYOUT_RE.test(base)) wrapper.push(token)
-    else if (/^rounded/.test(base)) {
-      // Скругление нужно обоим: полю — для вида, обёртке — чтобы кольцо повторило форму.
-      wrapper.push(token)
-      own.push(token)
-    } else own.push(token)
-  }
-  return { wrapper: wrapper.join(" "), own: own.join(" ") }
+type InputProps = Omit<React.ComponentProps<'input'>, 'size'> & {
+  /** Coss visual size; a number is forwarded as the native input size attribute. */
+  size?: 'sm' | 'default' | 'lg' | number
+  /** Compatibility flags used by Coss composite controls. */
+  nativeInput?: boolean
+  unstyled?: boolean
 }
 
-/** Общая обёртка с кольцом для Input и Textarea. */
-export function useHoverRing<E extends HTMLElement>(
-  onMouseEnter?: React.MouseEventHandler<E>,
-  onMouseLeave?: React.MouseEventHandler<E>
-): {
-  hovered: boolean
-  handlers: { onMouseEnter: React.MouseEventHandler<E>; onMouseLeave: React.MouseEventHandler<E> }
-} {
-  const [hovered, setHovered] = React.useState(false)
-  return {
-    hovered,
-    handlers: {
-      onMouseEnter: (e) => {
-        setHovered(true)
-        onMouseEnter?.(e)
-      },
-      onMouseLeave: (e) => {
-        setHovered(false)
-        onMouseLeave?.(e)
-      }
-    }
-  }
-}
-
-function Input({ className, type, onMouseEnter, onMouseLeave, ...props }: React.ComponentProps<"input">) {
-  const { hovered, handlers } = useHoverRing(onMouseEnter, onMouseLeave)
-  const { wrapper, own } = splitLayoutClasses(className)
+function Input({ className, type, size = 'default', nativeInput: _nativeInput, unstyled = false, ...props }: InputProps) {
+  const nativeSize = typeof size === 'number' ? size : undefined
   return (
-    <span data-slot="input-wrapper" className={cn("relative block w-full min-w-0 rounded-md", wrapper)}>
-      <input
-        type={type}
-        data-slot="input"
-        className={cn(
-          "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30",
-          "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
-          "aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40",
-          own
-        )}
-        {...handlers}
-        {...props}
-      />
-      <HoverBorderRing active={hovered && !props.disabled} />
-    </span>
+    <input
+      type={type}
+      size={nativeSize}
+      data-size={typeof size === 'string' ? size : 'default'}
+      data-slot={unstyled ? 'input-control' : 'input'}
+      className={cn(
+        !unstyled &&
+          'h-8 w-full min-w-0 rounded-lg border border-input bg-popover px-2.5 text-sm text-foreground shadow-xs outline-none transition-[background-color,border-color,box-shadow] placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:opacity-60',
+        !unstyled &&
+          'focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:bg-input/30',
+        unstyled && 'w-full min-w-0 bg-transparent outline-none placeholder:text-muted-foreground',
+        size === 'sm' && !unstyled && 'h-7 px-2 text-xs',
+        size === 'lg' && !unstyled && 'h-9 px-3',
+        className
+      )}
+      {...props}
+    />
   )
 }
 
-export { Input }
+export { Input, type InputProps }

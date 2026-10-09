@@ -278,7 +278,7 @@ export function Window({
         // Тень на внешней оболочке без overflow-hidden — иначе box-shadow клипится.
         'absolute',
         !win.maximized &&
-          'shadow-[0_2px_8px_rgba(0,0,0,0.18),0_12px_40px_-4px_rgba(0,0,0,0.35),0_24px_64px_-12px_rgba(0,0,0,0.28)]',
+          'shadow-[0_1px_2px_rgba(0,0,0,0.18),0_18px_48px_-18px_rgba(0,0,0,0.55)]',
         genieOut && 'pointer-events-none'
       )}
       style={{ zIndex }}
@@ -344,18 +344,18 @@ export function Window({
         if (!genieOut) focusWindow(win.id)
       }}
     >
-      {/* Плотная заливка без backdrop-blur: поверх виджетов «Моего дня»
-          (тоже blur + GlowingEffect) Chromium рисует ghost-рамки с радугой. */}
+      {/* Плотная заливка без backdrop-blur: поверх виджетов Chromium иначе
+          рисует артефакты на границах двух размытых поверхностей. */}
       <div
         className={cn(
-          'relative flex h-full w-full flex-col overflow-hidden border border-white/15 bg-card text-card-foreground dark:border-white/10',
-          isTop && 'ring-1 ring-foreground/10'
+          'relative flex h-full w-full flex-col overflow-hidden border border-border bg-card text-card-foreground',
+          isTop && 'ring-1 ring-ring/40'
         )}
         style={{ borderRadius: 'inherit' }}
       >
       <div
         className={cn(
-          'no-drag relative flex h-9 w-full shrink-0 items-center gap-2 border-b border-white/10 bg-muted/40 px-3',
+          'no-drag relative flex h-9 w-full shrink-0 items-center gap-2 border-b border-border bg-secondary/60 px-2',
           peekMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
         )}
         onPointerDown={onTitlePointerDown}
@@ -363,35 +363,43 @@ export function Window({
           if (!peekMode) runMaximize()
         }}
       >
-        {/* Как в macOS: глиф внутри кружка проявляется только при наведении на всю тройку. */}
-        <div className="group flex items-center gap-1.5">
-          <button
+        <div className="flex items-center gap-0.5">
+          <Button
             type="button"
+            size="icon-xs"
+            variant="ghost"
             title="Закрыть"
+            aria-label="Закрыть"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => closeWindow(win.id)}
-            className="flex size-3 items-center justify-center rounded-full bg-[#ff5f57]"
+            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive-foreground"
           >
-            <X className="size-2 text-[#4d0000] opacity-0 group-hover:opacity-100" strokeWidth={3} />
-          </button>
-          <button
+            <X className="size-3" />
+          </Button>
+          <Button
             type="button"
+            size="icon-xs"
+            variant="ghost"
             title="Свернуть"
+            aria-label="Свернуть"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={runMinimize}
-            className="flex size-3 items-center justify-center rounded-full bg-[#febc2e]"
+            className="text-muted-foreground"
           >
-            <Minus className="size-2 text-[#5c3c00] opacity-0 group-hover:opacity-100" strokeWidth={3} />
-          </button>
-          <button
+            <Minus className="size-3" />
+          </Button>
+          <Button
             type="button"
+            size="icon-xs"
+            variant="ghost"
             title={win.maximized ? 'Восстановить' : 'Развернуть'}
+            aria-label={win.maximized ? 'Восстановить' : 'Развернуть'}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={runMaximize}
-            className="flex size-3 items-center justify-center rounded-full bg-[#28c840]"
+            className="text-muted-foreground"
           >
-            <Maximize2 className="size-1.5 text-[#004d00] opacity-0 group-hover:opacity-100" strokeWidth={4} />
-          </button>
+            <Maximize2 className="size-3" />
+          </Button>
         </div>
 
         {isService && (
@@ -405,7 +413,7 @@ export function Window({
           </div>
         )}
         {isService && service && (
-          <div className="ml-1 flex shrink-0 items-center gap-0.5 border-l border-white/10 pl-1">
+          <div className="ml-1 flex shrink-0 items-center gap-0.5 border-l border-border pl-1">
             <Button
               type="button"
               size="icon-xs"

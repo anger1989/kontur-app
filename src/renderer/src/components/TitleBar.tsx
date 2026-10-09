@@ -4,14 +4,11 @@ import { useStore } from '@/store'
 import { EnvStatusMenu, EnvTrayConnectBridge } from '@/components/EnvStatusMenu'
 import type { TunnelState } from '@shared/types'
 import { cn } from '@/lib/utils'
-import { HoverBorderRing } from '@/components/ui/hover-border-gradient'
 import { managedVpnEnvs } from '@/lib/envTunnel'
+import { Clock } from '@/components/Clock'
+import { Button } from '@/components/ui/button'
+import { HoverBorderRing } from '@/components/ui/hover-border-gradient'
 
-/**
- * Кнопка трея в шапке. Не ghost-Button: у того непрозрачный bg-background
- * (на полупрозрачной шапке виден квадратиком) и подпрыгивание на hover —
- * в строке рядом со светофором иконки должны стоять ровно, как в macOS.
- */
 function TrayButton({
   title,
   icon: Icon,
@@ -25,23 +22,21 @@ function TrayButton({
 }): JSX.Element {
   const [hovered, setHovered] = useState(false)
   return (
-    <button
+    <Button
       type="button"
+      size="icon-sm"
+      variant={active ? 'secondary' : 'ghost'}
       title={title}
       aria-label={title}
       aria-pressed={active}
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={cn(
-        'relative flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-        'hover:bg-foreground/10 hover:text-foreground',
-        active && 'bg-foreground/10 text-foreground'
-      )}
+      className="size-7 border-transparent text-muted-foreground shadow-none hover:bg-brand-soft hover:text-brand"
     >
       <Icon className="size-4" strokeWidth={1.75} />
-      <HoverBorderRing active={hovered} />
-    </button>
+      <HoverBorderRing active={hovered || Boolean(active)} tone="amber" width={1} />
+    </Button>
   )
 }
 
@@ -66,7 +61,7 @@ export function TitleBar(): JSX.Element {
   const [fullScreen, setFullScreen] = useState(false)
 
   useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 15_000)
+    const id = window.setInterval(() => setNow(new Date()), 60_000)
     return () => window.clearInterval(id)
   }, [])
 
@@ -79,7 +74,6 @@ export function TitleBar(): JSX.Element {
     return window.kontur.app.onMaximizedChange(setFullScreen)
   }, [])
 
-  const time = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
   const date = now.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })
 
   // Только VPN-контуры — «Общие» в шапку статуса не тащим.
@@ -99,7 +93,7 @@ export function TitleBar(): JSX.Element {
     // по шапке) светофор оставляет — отступ не трогаем, иначе иконки залезают под него.
     <header
       className={cn(
-        'drag flex h-10 shrink-0 items-center bg-sidebar/55 pr-4 shadow-[inset_0_-1px_0_rgb(255_255_255/0.1)] backdrop-blur-2xl transition-[padding] duration-200',
+        'drag flex h-10 shrink-0 items-center border-b border-brand/10 bg-sidebar/78 pr-4 shadow-[inset_0_1px_rgb(255_255_255/0.06),inset_0_-1px_rgb(245_158_11/0.08),0_8px_28px_-20px_rgb(245_158_11/0.5)] backdrop-blur-2xl transition-[padding] duration-200',
         fullScreen ? 'pl-3' : 'pl-[80px]'
       )}
     >
@@ -127,7 +121,7 @@ export function TitleBar(): JSX.Element {
       <div className="no-drag flex items-center gap-3 text-[12px] tabular-nums select-none">
         {layout && (
           <span
-            className="inline-flex min-w-[1.75rem] items-center justify-center rounded-md border border-white/10 bg-foreground/5 px-1.5 py-0.5 text-[11px] font-semibold tracking-wide text-foreground"
+            className="inline-flex min-w-[1.75rem] items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent px-1.5 py-0.5 text-[11px] font-semibold tracking-wide text-sidebar-foreground"
             title={`Раскладка: ${layout.name}`}
           >
             {layout.short}
@@ -144,9 +138,9 @@ export function TitleBar(): JSX.Element {
           </div>
         )}
         {!envs.length && layout && <span className="text-muted-foreground/40">·</span>}
-        <span className="text-muted-foreground">
-          {date} · {time}
-        </span>
+        <span className="text-muted-foreground">{date}</span>
+        <span className="text-muted-foreground/40">·</span>
+        <Clock />
       </div>
       <EnvTrayConnectBridge />
     </header>

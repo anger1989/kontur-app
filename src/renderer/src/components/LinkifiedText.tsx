@@ -29,7 +29,7 @@ export function LinkifiedText({
             <span key={i}>
               <a
                 href={href}
-                className="text-primary underline-offset-2 hover:underline break-all"
+                className="text-brand underline decoration-brand/45 underline-offset-2 hover:decoration-brand break-all"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()

@@ -51,7 +51,7 @@ export function LockScreen({
         onSubmit={(e) => void submit(e)}
         className="w-full max-w-sm rounded-2xl border border-white/15 bg-black/35 px-7 py-8 shadow-2xl backdrop-blur-xl"
       >
-        <p className="text-[11px] font-semibold tracking-[0.14em] text-[#f09a05] uppercase">Kontur</p>
+        <p className="text-[11px] font-semibold tracking-[0.14em] text-neutral-300 uppercase">Kontur</p>
         <h1 className="mt-3 font-sans text-[26px] font-semibold tracking-tight text-white">
           С возвращением
         </h1>
@@ -65,9 +65,7 @@ export function LockScreen({
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           aria-label="Пароль профиля"
-          // Тёмное стекло: фокус подсвечиваем фирменным оранжевым — токен --ring
-          // на этом фоне почти не виден.
-          className="mt-7 h-11 rounded-lg border-white/15 bg-white/8 text-white placeholder:text-white/35 focus-visible:border-[#f09a05]/60 focus-visible:ring-[#f09a05]/25"
+          className="mt-7 h-11 rounded-lg border-white/15 bg-white/8 text-white placeholder:text-white/35 focus-visible:border-white/35 focus-visible:ring-white/20"
           placeholder="Пароль профиля"
         />
         {error && <p className="mt-2 text-[12px] text-red-300">{error}</p>}
@@ -75,7 +73,7 @@ export function LockScreen({
         <Button
           type="submit"
           disabled={busy}
-          className="mt-3 h-11 w-full rounded-lg bg-[#f09a05] text-[#1a1200] hover:bg-[#f2b43d]"
+          className="mt-3 h-11 w-full rounded-lg bg-neutral-100 text-neutral-900 hover:bg-white"
         >
           Войти
         </Button>

@@ -118,18 +118,17 @@ export function Browser({
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.metaKey || e.ctrlKey
       if (!mod || e.altKey) return
-      const key = e.key.toLowerCase()
-      if (key === 't') {
+      if (e.code === 'KeyT') {
         e.preventDefault()
         newTab()
-      } else if (key === 'w' && activeId) {
+      } else if (e.code === 'KeyW' && activeId) {
         e.preventDefault()
         void window.kontur.browser.closeTab(activeId)
-      } else if (key === 'l') {
+      } else if (e.code === 'KeyL') {
         e.preventDefault()
         addressRef.current?.focus()
         addressRef.current?.select()
-      } else if (key === 'r' && activeId) {
+      } else if (e.code === 'KeyR' && activeId) {
         e.preventDefault()
         void window.kontur.browser.reload(activeId)
       }

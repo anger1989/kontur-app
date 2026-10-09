@@ -313,7 +313,7 @@ export function Files(): JSX.Element {
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     {e.kind === 'dir' ? (
-                      <Folder className="size-3.5 shrink-0 text-[#f09a05]" />
+                      <Folder className="size-3.5 shrink-0 text-muted-foreground" />
                     ) : (
                       <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
                     )}

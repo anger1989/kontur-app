@@ -60,7 +60,7 @@ const COLUMN_ICONS: Record<ColumnKind, JSX.Element> = {
     </svg>
   ),
   'in-progress': (
-    <svg aria-hidden fill="none" height="13" stroke="#f59e0b" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" viewBox="0 0 24 24" width="13">
+    <svg aria-hidden fill="none" height="13" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" viewBox="0 0 24 24" width="13">
       <circle cx="12" cy="12" r="10" />
       <polyline points="12 6 12 12 16 14" />
     </svg>

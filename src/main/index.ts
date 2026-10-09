@@ -97,10 +97,24 @@ function createWindow(): void {
   win.on('leave-full-screen', emitFullScreen)
   // Закрытие окна прячет приложение в трей, а не выгружает его: уведомления и
   // синхронизация продолжают работать в фоне. Полный выход — через трей или Cmd+Q.
+  // macOS: hide() из native fullscreen оставляет чёрный Space — сначала выходим.
+  let hidingFromFullScreen = false
   win.on('close', (e) => {
     if (!quitting) {
       e.preventDefault()
-      win?.hide()
+      const w = win
+      if (!w || w.isDestroyed()) return
+      if (w.isFullScreen()) {
+        if (hidingFromFullScreen) return
+        hidingFromFullScreen = true
+        w.once('leave-full-screen', () => {
+          hidingFromFullScreen = false
+          if (!w.isDestroyed() && !quitting) w.hide()
+        })
+        w.setFullScreen(false)
+        return
+      }
+      w.hide()
       return
     }
     // Пока окно ещё живо — снять WebContentsView, иначе на `closed` будет

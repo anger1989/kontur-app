@@ -53,6 +53,13 @@ const MOVING: Record<Direction, string> = {
   RIGHT: spot(GLOW.blue, '16.2% 41.2% at 100% 50%')
 }
 const HIGHLIGHT = spot(GLOW.highlight, '75% 181.16% at 50% 50%')
+const AMBER_MOVING: Record<Direction, string> = {
+  TOP: spot([251, 191, 36], '20.7% 50% at 50% 0%'),
+  LEFT: spot([245, 158, 11], '16.6% 43.1% at 0% 50%'),
+  BOTTOM: spot([217, 119, 6], '20.7% 50% at 50% 100%'),
+  RIGHT: spot([252, 211, 77], '16.2% 41.2% at 100% 50%')
+}
+const AMBER_HIGHLIGHT = spot([245, 158, 11], '75% 181.16% at 50% 50%')
 const DIRECTIONS: Direction[] = ['TOP', 'LEFT', 'BOTTOM', 'RIGHT']
 
 /** Оставить от прямоугольника только рамку толщиной `padding`. */
@@ -67,6 +74,7 @@ export function HoverBorderRing({
   duration = 1,
   clockwise = true,
   width = 1.5,
+  tone = 'spectrum',
   className
 }: {
   active: boolean
@@ -74,6 +82,7 @@ export function HoverBorderRing({
   clockwise?: boolean
   /** Толщина кольца, px. */
   width?: number
+  tone?: 'spectrum' | 'amber'
   className?: string
 }): JSX.Element {
   const [direction, setDirection] = useState<Direction>('TOP')
@@ -91,6 +100,9 @@ export function HoverBorderRing({
     return () => window.clearInterval(id)
   }, [active, duration, clockwise])
 
+  const moving = tone === 'amber' ? AMBER_MOVING : MOVING
+  const highlight = tone === 'amber' ? AMBER_HIGHLIGHT : HIGHLIGHT
+
   return (
     <motion.span
       aria-hidden
@@ -106,8 +118,12 @@ export function HoverBorderRing({
         mask: RING_MASK,
         maskComposite: 'exclude'
       }}
-      initial={{ background: MOVING[direction] }}
-      animate={{ background: active ? [MOVING[direction], HIGHLIGHT, MOVING[direction]] : MOVING[direction] }}
+      initial={{ background: moving[direction] }}
+      animate={{
+        background: active
+          ? [moving[direction], highlight, moving[direction]]
+          : moving[direction]
+      }}
       transition={{ ease: 'linear', duration }}
     />
   )

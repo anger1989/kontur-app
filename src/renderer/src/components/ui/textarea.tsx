@@ -1,36 +1,19 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { HoverBorderRing } from "@/components/ui/hover-border-gradient"
-import { splitLayoutClasses, useHoverRing } from "@/components/ui/input"
 
 const BASE =
-  "flex field-sizing-content min-h-16 w-full rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:aria-invalid:ring-destructive/40"
+  "flex field-sizing-content min-h-16 w-full rounded-lg border border-input bg-popover px-2.5 py-2 text-sm shadow-xs outline-none transition-[background-color,border-color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:bg-input/30"
 
-function Textarea({ className, onMouseEnter, onMouseLeave, ...props }: React.ComponentProps<"textarea">) {
-  const { hovered, handlers } = useHoverRing(onMouseEnter, onMouseLeave)
+type TextareaProps = React.ComponentProps<"textarea"> & { unstyled?: boolean }
 
-  // Безрамочная «поверхность» (редактор на всю панель, `border-0`) — не поле в
-  // форме: кольцо там нарисовало бы рамку, которой нет, а обёртка сломала бы
-  // растяжение `flex-1` по высоте. Оставляем как было.
-  if (/(^|\s)border-0(\s|$)/.test(className ?? "")) {
-    return (
-      <textarea
-        data-slot="textarea"
-        className={cn(BASE, className)}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
-        {...props}
-      />
-    )
-  }
-
-  const { wrapper, own } = splitLayoutClasses(className)
+function Textarea({ className, unstyled = false, ...props }: TextareaProps) {
   return (
-    <span data-slot="textarea-wrapper" className={cn("relative block w-full min-w-0 rounded-md", wrapper)}>
-      <textarea data-slot="textarea" className={cn(BASE, own)} {...handlers} {...props} />
-      <HoverBorderRing active={hovered && !props.disabled} />
-    </span>
+    <textarea
+      data-slot={unstyled ? "textarea-control" : "textarea"}
+      className={cn(unstyled ? "w-full min-w-0 resize-none bg-transparent outline-none placeholder:text-muted-foreground" : BASE, className)}
+      {...props}
+    />
   )
 }
 
-export { Textarea }
+export { Textarea, type TextareaProps }

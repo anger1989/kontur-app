@@ -160,8 +160,9 @@ export function createPtySession(
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pty = require('node-pty') as typeof import('node-pty')
   const cwd = opts.cwd && existsSync(opts.cwd) ? opts.cwd : defaultCwd()
-  const cols = Math.max(20, opts.cols ?? 80)
-  const rows = Math.max(8, opts.rows ?? 24)
+  // Виджет ассистента ~12–16 рядов: clamp 8 завышал PTY → TUI + курсор «ниже» ввода.
+  const cols = Math.max(2, opts.cols ?? 80)
+  const rows = Math.max(2, opts.rows ?? 24)
 
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
@@ -242,7 +243,7 @@ export function resizePty(id: string, cols: number, rows: number): void {
   const s = sessions.get(id)
   if (!s) return
   try {
-    s.proc.resize(Math.max(20, cols), Math.max(8, rows))
+    s.proc.resize(Math.max(2, cols), Math.max(2, rows))
   } catch {
     /* уже закрыт */
   }

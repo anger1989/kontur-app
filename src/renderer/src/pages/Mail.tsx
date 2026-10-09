@@ -995,7 +995,7 @@ export function Mail({
                     {detail.bodyHtml ? (
                       <HtmlWithExternalLinks
                         html={sanitizeHtml(detail.bodyHtml)}
-                        className="mail-html prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed [&_a]:text-primary [&_a]:underline"
+                        className="mail-html prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed [&_a]:text-brand [&_a]:underline [&_a]:decoration-brand/45 [&_a]:underline-offset-2"
                       />
                     ) : (
                       <pre className="font-sans text-[13px] leading-relaxed whitespace-pre-wrap">

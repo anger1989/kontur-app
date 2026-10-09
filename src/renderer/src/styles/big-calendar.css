@@ -58,10 +58,10 @@
 
 /* Сегодня, чужой месяц, текущее время */
 .kontur-calendar .rbc-today {
-  background: color-mix(in oklab, var(--primary) 7%, transparent);
+  background: color-mix(in oklab, var(--brand) 8%, transparent);
 }
 .kontur-calendar .rbc-header.rbc-today {
-  color: var(--primary);
+  color: var(--brand);
   font-weight: 600;
 }
 .kontur-calendar .rbc-off-range-bg {
@@ -76,10 +76,10 @@
 }
 .kontur-calendar .rbc-date-cell.rbc-now {
   font-weight: 700;
-  color: var(--primary);
+  color: var(--brand);
 }
 .kontur-calendar .rbc-current-time-indicator {
-  background: var(--primary);
+  background: var(--brand);
   height: 2px;
 }
 
@@ -138,13 +138,13 @@
 /* Выделение мышью */
 .kontur-calendar .rbc-slot-selection,
 .kontur-calendar .rbc-selected-cell {
-  background: color-mix(in oklab, var(--primary) 18%, transparent);
+  background: color-mix(in oklab, var(--brand) 18%, transparent);
   color: var(--foreground);
 }
 
 /* «+ ещё N» и всплывающий список дня в месяце */
 .kontur-calendar .rbc-show-more {
-  color: var(--primary);
+  color: var(--brand);
   background: transparent;
   font-weight: 500;
 }

@@ -1070,20 +1070,20 @@ export class ServiceViewManager {
         event.preventDefault()
         setTimeout(fn, 0)
       }
-      switch (input.key.toLowerCase()) {
-        case 't':
+      switch (input.code) {
+        case 'KeyT':
           act(() => this.newTab({ envId: tab.envId, afterId: tab.id }))
           break
-        case 'w':
+        case 'KeyW':
           act(() => this.closeTab(tab.id))
           break
-        case 'r':
+        case 'KeyR':
           act(() => this.reload(tab.id))
           break
-        case '[':
+        case 'BracketLeft':
           act(() => this.goBack(tab.id))
           break
-        case ']':
+        case 'BracketRight':
           act(() => this.tabForward(tab.id))
           break
       }

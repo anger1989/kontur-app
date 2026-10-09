@@ -204,7 +204,7 @@ function MiniBars({
         <div key={i} className="flex min-w-0 flex-1 flex-col items-center gap-1">
           <div className="flex h-12 w-full items-end justify-center">
             <div
-              className="w-full max-w-[18px] rounded-sm bg-primary/70 transition-[height]"
+              className="w-full max-w-[18px] rounded-sm bg-brand/75 transition-[height]"
               style={{
                 height: `${Math.max(v > 0 ? 12 : 2, (v / max) * 100)}%`,
                 background: accent
@@ -274,7 +274,7 @@ function Spark({ values }: { values: number[] }): JSX.Element {
       {values.map((v, i) => (
         <span
           key={i}
-          className="w-[4px] rounded-[1px] bg-primary/60"
+          className="w-[4px] rounded-[1px] bg-brand/65"
           style={{ height: `${Math.max(v > 0 ? 25 : 8, (v / max) * 100)}%` }}
         />
       ))}
@@ -305,7 +305,7 @@ function LineSpark({ values, labels }: { values: number[]; labels: string[] }): 
           strokeLinejoin="round"
           strokeLinecap="round"
           points={polyline}
-          className="text-primary/70"
+          className="text-brand/75"
         />
         {pts.map(([x, y], i) => (
           <circle
@@ -313,7 +313,7 @@ function LineSpark({ values, labels }: { values: number[]; labels: string[] }): 
             cx={x}
             cy={y}
             r={values[i]! > 0 ? 1.6 : 1.1}
-            className={values[i]! > 0 ? 'fill-primary' : 'fill-muted-foreground/40'}
+            className={values[i]! > 0 ? 'fill-brand' : 'fill-muted-foreground/40'}
           >
             <title>{`${labels[i]}: ${values[i]}`}</title>
           </circle>
@@ -355,7 +355,7 @@ function MiniLine({ values, labels }: { values: number[]; labels: string[] }): J
           className="stroke-border"
           strokeWidth={1}
         />
-        <polygon points={area} className="fill-primary/15" />
+        <polygon points={area} className="fill-brand/15" />
         <polyline
           fill="none"
           stroke="currentColor"
@@ -363,7 +363,7 @@ function MiniLine({ values, labels }: { values: number[]; labels: string[] }): J
           strokeLinejoin="round"
           strokeLinecap="round"
           points={polyline}
-          className="text-primary"
+          className="text-brand"
         />
         {pts.map(([x, y], i) => (
           <g key={i}>
@@ -371,7 +371,7 @@ function MiniLine({ values, labels }: { values: number[]; labels: string[] }): J
               cx={x}
               cy={y}
               r={3}
-              className={values[i]! > 0 ? 'fill-primary' : 'fill-muted-foreground/50'}
+              className={values[i]! > 0 ? 'fill-brand' : 'fill-muted-foreground/50'}
             >
               <title>{`${labels[i]}: ${values[i]}`}</title>
             </circle>

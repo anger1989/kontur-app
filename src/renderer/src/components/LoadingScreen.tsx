@@ -4,7 +4,7 @@ import { TextGenerateEffect } from '@/components/ui/text-generate-effect'
 
 /**
  * Экран загрузки / приветствия — старт приложения и финал онбординга.
- * Брендовые цвета: графит фона + оранжевый акцент.
+ * Брендовые цвета: графит фона + тёплый amber-акцент.
  */
 export function LoadingScreen({
   message = 'Собираем контуры…'

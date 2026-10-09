@@ -110,7 +110,7 @@ export function Onboarding({ onFinished }: { onFinished: () => void }): JSX.Elem
       {/* Тонкая полоса прогресса — как при установке ОС */}
       <div className="h-0.5 w-full bg-white/5">
         <div
-          className="h-full bg-[#f09a05] transition-[width] duration-500 ease-out"
+          className="h-full bg-neutral-200 transition-[width] duration-500 ease-out"
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -119,7 +119,7 @@ export function Onboarding({ onFinished }: { onFinished: () => void }): JSX.Elem
         {/* Левый rail со шагами */}
         <aside className="flex w-[240px] shrink-0 flex-col border-r border-white/8 bg-[#101114] px-5 py-8">
           <div className="mb-8">
-            <p className="text-[11px] font-semibold tracking-[0.14em] text-[#f09a05] uppercase">
+            <p className="text-[11px] font-semibold tracking-[0.14em] text-neutral-300 uppercase">
               Установка
             </p>
             <h1 className="mt-1 font-sans text-[22px] font-semibold tracking-tight text-white">
@@ -145,8 +145,8 @@ export function Onboarding({ onFinished }: { onFinished: () => void }): JSX.Elem
                     <span
                       className={cn(
                         'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold',
-                        done && 'bg-[#f09a05] text-[#1a1200]',
-                        active && !done && 'bg-[#f09a05]/25 text-[#f09a05] ring-1 ring-[#f09a05]/50',
+                        done && 'bg-neutral-200 text-neutral-900',
+                        active && !done && 'bg-white/12 text-white ring-1 ring-white/25',
                         !done && !active && 'bg-white/8 text-white/50'
                       )}
                     >
@@ -177,7 +177,7 @@ export function Onboarding({ onFinished }: { onFinished: () => void }): JSX.Elem
 
           <div className="relative flex min-h-0 flex-1 flex-col px-10 py-9 lg:px-14">
             <div className="mb-6">
-              <p className="text-[11px] font-semibold tracking-[0.12em] text-[#f09a05]/90 uppercase">
+              <p className="text-[11px] font-semibold tracking-[0.12em] text-neutral-300 uppercase">
                 Шаг {step + 1} из {STEPS.length}
               </p>
               <h2 className="mt-1 font-sans text-[28px] font-semibold tracking-tight text-white">
@@ -267,7 +267,7 @@ export function Onboarding({ onFinished }: { onFinished: () => void }): JSX.Elem
                 {step < STEPS.length - 1 ? (
                   <Button
                     type="button"
-                    className="bg-[#f09a05] text-[#1a1200] hover:bg-[#f2b43d]"
+                    className="bg-neutral-100 text-neutral-900 hover:bg-white"
                     disabled={profileBlocked}
                     onClick={goNext}
                   >
@@ -277,7 +277,7 @@ export function Onboarding({ onFinished }: { onFinished: () => void }): JSX.Elem
                 ) : (
                   <Button
                     type="button"
-                    className="bg-[#f09a05] text-[#1a1200] hover:bg-[#f2b43d]"
+                    className="bg-neutral-100 text-neutral-900 hover:bg-white"
                     disabled={busy}
                     onClick={() => void finish()}
                   >
@@ -303,15 +303,15 @@ function WelcomeStep(): JSX.Element {
       </p>
       <ul className="space-y-3 text-[14px] text-white/60">
         <li className="flex gap-3">
-          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[#f09a05]" />
+          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-neutral-300" />
           Каждый контур — своя сеть, куки и сессия браузера
         </li>
         <li className="flex gap-3">
-          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[#f09a05]" />
+          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-neutral-300" />
           Mattermost и Толк живут в «Общих» и не зависят от VPN
         </li>
         <li className="flex gap-3">
-          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[#f09a05]" />
+          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-neutral-300" />
           Всё можно донастроить позже в Настройках
         </li>
       </ul>
@@ -348,7 +348,7 @@ function LookStep({
               className={cn(
                 'rounded-lg border px-4 py-2.5 text-[13px] transition-colors',
                 theme === t.id
-                  ? 'border-[#f09a05]/60 bg-[#f09a05]/15 text-white'
+                  ? 'border-white/35 bg-white/10 text-white'
                   : 'border-white/10 bg-white/4 text-white/65 hover:border-white/20'
               )}
             >
@@ -369,7 +369,7 @@ function LookStep({
               className={cn(
                 'size-14 rounded-lg border-2 bg-cover bg-center',
                 wallpaper?.kind === 'image' && wallpaper.value === img.key
-                  ? 'border-[#f09a05]'
+                  ? 'border-white/70'
                   : 'border-transparent'
               )}
               style={{ backgroundImage: `url(${img.url})` }}
@@ -384,7 +384,7 @@ function LookStep({
               className={cn(
                 'size-14 rounded-lg border-2',
                 wallpaper?.kind === 'gradient' && wallpaper.value === p.key
-                  ? 'border-[#f09a05]'
+                  ? 'border-white/70'
                   : 'border-transparent'
               )}
               style={{ background: p.css }}

@@ -271,18 +271,18 @@ export function TodayMeetingsCarousel({
                 else cardRefs.current.delete(ev.id)
               }}
               onClick={() => setSelected(ev)}
-              style={{ borderLeftColor: past ? undefined : (env?.accent ?? undefined) }}
               className={cn(
                 'flex w-[clamp(240px,24vw,330px)] min-h-[108px] shrink-0 snap-start flex-col gap-1.5',
-                'rounded-xl border border-l-[3px] bg-card px-4 py-3 text-left',
+                'rounded-xl border bg-card px-4 py-3 text-left',
                 'transition-[opacity,background-color,border-color]',
-                'hover:bg-accent/50',
+                'hover:border-brand/35 hover:bg-brand-soft',
                 // Объём — только у актуальных карточек: прошедшие намеренно
                 // «плоские и выцветшие», лепка тут только мешала бы.
-                !past && 'desk-tile',
-                live && 'border-primary/40 bg-primary/5',
-                soon && !past && 'border-foreground/20',
-                past && 'border-transparent bg-transparent opacity-45 hover:opacity-75'
+                !past && 'desk-tile border-brand/20 bg-brand/[0.035]',
+                live && 'border-brand/50 bg-brand/10 shadow-[0_8px_24px_-16px_rgb(245_158_11/0.75)]',
+                soon && !past && 'border-brand/35',
+                past &&
+                  'border-brand/10 bg-brand/[0.02] opacity-45 hover:border-brand/25 hover:bg-brand/[0.05] hover:opacity-75'
               )}
             >
               <div className="flex items-baseline gap-1.5 tabular-nums">
@@ -291,7 +291,7 @@ export function TodayMeetingsCarousel({
                 </span>
                 {t1 && <span className="text-[11px] text-muted-foreground">– {t1}</span>}
                 {live && (
-                  <span className="ml-auto rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                  <span className="ml-auto rounded-full bg-brand/15 px-2 py-0.5 text-[10px] font-semibold text-brand">
                     сейчас
                   </span>
                 )}

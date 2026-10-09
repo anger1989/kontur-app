@@ -1,5 +1,10 @@
 {
-  "include": ["src/renderer/src/**/*", "src/preload/*.d.ts", "src/shared/**/*"],
+  "include": [
+    "src/renderer/src/**/*",
+    "src/preload/*.d.ts",
+    "src/shared/**/*",
+    "components/motion-primitives/**/*"
+  ],
   "compilerOptions": {
     "composite": true,
     "target": "ES2022",
