@@ -605,14 +605,20 @@ export function LiveTerminal({
     const term = new XTerm({
       cursorBlink: true,
       cursorStyle: 'bar',
-      fontFamily: "var(--font-mono), 'IBM Plex Mono', Menlo, monospace",
+      // Canvas measureText не понимает var(--font-*) — иначе метрики ячейки
+      // расходятся с отрисовкой и курсор agent'а уезжает от строки ввода.
+      fontFamily: "'IBM Plex Mono', Menlo, Monaco, 'Courier New', monospace",
       fontSize,
       // 1.0 — FitAddon считает rows по метрикам шрифта; lineHeight>1 раздувает
       // визуал относительно fit и оставляет «пустой» низ с курсором.
       lineHeight: 1,
+      letterSpacing: 0,
       // macOS Option как Meta — привычные шорткаты шелла.
       macOptionIsMeta: true,
       allowTransparency: false,
+      // FitAddon резервирует 14px под overview ruler при scrollback>0 —
+      // для agent TUI скролл не нужен, лишний запас врёт cols.
+      scrollback: profile === 'agent' ? 0 : 1000,
       theme: {
         background: '#171717',
         foreground: '#d4d4d4',
@@ -651,11 +657,38 @@ export function LiveTerminal({
     let roTimer: ReturnType<typeof setTimeout> | null = null
     const ac = new AbortController()
 
+    /**
+     * FitAddon берёт getComputedStyle(parent).height и НЕ вычитает padding родителя.
+     * Хост без padding (см. JSX) — иначе rows завышены и курсор TUI ниже поля ввода.
+     * Дополнительно клампим по реальному content-box (client* минус padding).
+     */
     const syncSize = (force = false): void => {
       try {
         fit.fit()
       } catch {
         return
+      }
+      const core = (
+        term as unknown as {
+          _core?: { _renderService?: { dimensions?: { css?: { cell?: { width: number; height: number } } } } }
+        }
+      )._core
+      const cell = core?._renderService?.dimensions?.css?.cell
+      if (cell && cell.width > 0 && cell.height > 0) {
+        const cs = getComputedStyle(host)
+        const padX =
+          (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0)
+        const padY =
+          (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
+        const cols = Math.max(2, Math.floor((host.clientWidth - padX) / cell.width))
+        const rows = Math.max(1, Math.floor((host.clientHeight - padY) / cell.height))
+        if (cols !== term.cols || rows !== term.rows) {
+          try {
+            term.resize(cols, rows)
+          } catch {
+            /* ignore */
+          }
+        }
       }
       const cols = term.cols
       const rows = term.rows
@@ -663,16 +696,20 @@ export function LiveTerminal({
       sizeRef.current = { cols, rows }
       const id = sessionIdRef.current
       if (id) void window.kontur.terminal.resize(id, cols, rows)
-      // Курсор agent'а часто на последней строке TUI — без scroll он «висит» в пустоте.
       term.scrollToBottom()
     }
 
     const boot = async (): Promise<void> => {
       try {
+        // Метрики ячейки до загрузки веб-шрифта = fallback → после подмены курсор плывёт.
+        try {
+          await document.fonts.ready
+        } catch {
+          /* ignore */
+        }
         await waitForHostSize(host, ac.signal)
         if (disposed) return
-        fit.fit()
-        sizeRef.current = { cols: term.cols, rows: term.rows }
+        syncSize(true)
         term.focus()
 
         // Перезапуск только если seq ещё не применяли (не на каждый remount).
@@ -708,8 +745,14 @@ export function LiveTerminal({
         syncSize(true)
 
         // Agent TUI: replay ANSI со старым размером ломает курсор (виджет↔окно).
-        // SIGWINCH от resize выше заставляет agent перерисовать экран.
-        if (session.scrollback && !(session.reused && profile === 'agent')) {
+        // Двойной SIGWINCH (rows±1) — иначе часть сборок agent не перерисовывает composer.
+        if (profile === 'agent' && session.reused) {
+          const id = session.id
+          const { cols, rows } = term
+          void window.kontur.terminal.resize(id, cols, Math.max(8, rows - 1)).then(() => {
+            if (!disposed) void window.kontur.terminal.resize(id, cols, rows)
+          })
+        } else if (session.scrollback) {
           term.write(session.scrollback)
           term.scrollToBottom()
         }
@@ -782,10 +825,24 @@ export function LiveTerminal({
     if (!active) return
     const term = termRef.current
     const fit = fitRef.current
-    if (!term || !fit) return
+    const host = hostRef.current
+    if (!term || !fit || !host) return
     requestAnimationFrame(() => {
       try {
         fit.fit()
+        const core = (
+          term as unknown as {
+            _core?: {
+              _renderService?: { dimensions?: { css?: { cell?: { width: number; height: number } } } }
+            }
+          }
+        )._core
+        const cell = core?._renderService?.dimensions?.css?.cell
+        if (cell && cell.width > 0 && cell.height > 0) {
+          const cols = Math.max(2, Math.floor(host.clientWidth / cell.width))
+          const rows = Math.max(1, Math.floor(host.clientHeight / cell.height))
+          if (cols !== term.cols || rows !== term.rows) term.resize(cols, rows)
+        }
         const cols = term.cols
         const rows = term.rows
         sizeRef.current = { cols, rows }
@@ -814,8 +871,19 @@ export function LiveTerminal({
           {error}
         </div>
       ) : null}
-      {/* Без h-full на .xterm: растягивание ячеек уводило курсор в «пустой» низ. */}
-      <div ref={hostRef} className="min-h-0 flex-1 overflow-hidden p-2 [&_.xterm-viewport]:!overflow-auto" />
+      {/*
+        Padding снаружи хоста: FitAddon меряет parent без вычета padding и
+        завышает rows → курсор agent ниже строки ввода. Без h-full на .xterm.
+      */}
+      <div className="min-h-0 flex-1 overflow-hidden p-2">
+        <div
+          ref={hostRef}
+          className={cn(
+            'h-full min-h-0 w-full overflow-hidden',
+            profile !== 'agent' && '[&_.xterm-viewport]:!overflow-auto'
+          )}
+        />
+      </div>
     </div>
   )
 }

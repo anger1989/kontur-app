@@ -811,127 +811,140 @@ export function Mail({
             ) : detail ? (
               <>
                 <div className="shrink-0 border-b px-5 py-3">
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-start gap-2">
                     <h2 className="min-w-0 flex-1 text-[17px] leading-snug font-semibold">
                       {detail.subject}
                     </h2>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      title={selectedId && items.find((i) => i.id === selectedId)?.flagged ? 'Снять флаг' : 'Флаг'}
-                      onClick={() => {
-                        if (!selectedId) return
-                        const cur = items.find((i) => i.id === selectedId)
-                        const next = !cur?.flagged
-                        void window.kontur.mail.setFlagged(selectedId, next)
-                        setItems((prev) =>
-                          prev.map((it) => (it.id === selectedId ? { ...it, flagged: next } : it))
-                        )
-                      }}
-                    >
-                      <Star
-                        className={cn(
-                          items.find((i) => i.id === selectedId)?.flagged &&
-                            'fill-[var(--warning)] text-[var(--warning)]'
-                        )}
-                      />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      title="Непрочитанное"
-                      onClick={() => {
-                        if (!selectedId) return
-                        void window.kontur.mail.markUnread(selectedId)
-                        setItems((prev) =>
-                          prev.map((it) =>
-                            it.id === selectedId ? { ...it, unread: true, state: null } : it
-                          )
-                        )
-                        toast.message('Помечено как непрочитанное')
-                      }}
-                    >
-                      <MailOpen />
-                      Непрочит.
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => setMoveOpen(true)}>
-                      <FolderInput />
-                      Переместить
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        if (!selectedId) return
-                        const id = selectedId
-                        const prevFolder = items.find((i) => i.id === id)?.folder ?? 'inbox'
-                        void window.kontur.mail
-                          .move({ itemIds: [id], folderId: 'trash' })
-                          .then(() => {
-                            setItems((prev) =>
-                              prev.map((it) =>
-                                it.id === id ? { ...it, folder: 'trash' } : it
-                              )
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        title={
+                          selectedId && items.find((i) => i.id === selectedId)?.flagged
+                            ? 'Снять флаг'
+                            : 'Флаг'
+                        }
+                        onClick={() => {
+                          if (!selectedId) return
+                          const cur = items.find((i) => i.id === selectedId)
+                          const next = !cur?.flagged
+                          void window.kontur.mail.setFlagged(selectedId, next)
+                          setItems((prev) =>
+                            prev.map((it) =>
+                              it.id === selectedId ? { ...it, flagged: next } : it
                             )
-                            setSelectedId(null)
-                            setDetail(null)
-                            setComposeMode(null)
-                            toast.message('Перемещено в «Удалённые»', {
-                              action: {
-                                label: 'Отменить',
-                                onClick: () => {
-                                  void window.kontur.mail
-                                    .move({ itemIds: [id], folderId: prevFolder })
-                                    .then(() => {
-                                      setItems((prev) =>
-                                        prev.map((it) =>
-                                          it.id === id ? { ...it, folder: prevFolder } : it
+                          )
+                        }}
+                      >
+                        <Star
+                          className={cn(
+                            items.find((i) => i.id === selectedId)?.flagged &&
+                              'fill-[var(--warning)] text-[var(--warning)]'
+                          )}
+                        />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        title="Непрочитанное"
+                        onClick={() => {
+                          if (!selectedId) return
+                          void window.kontur.mail.markUnread(selectedId)
+                          setItems((prev) =>
+                            prev.map((it) =>
+                              it.id === selectedId ? { ...it, unread: true, state: null } : it
+                            )
+                          )
+                          toast.message('Помечено как непрочитанное')
+                        }}
+                      >
+                        <MailOpen />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        title="Переместить"
+                        onClick={() => setMoveOpen(true)}
+                      >
+                        <FolderInput />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        title="Удалить"
+                        onClick={() => {
+                          if (!selectedId) return
+                          const id = selectedId
+                          const prevFolder = items.find((i) => i.id === id)?.folder ?? 'inbox'
+                          void window.kontur.mail
+                            .move({ itemIds: [id], folderId: 'trash' })
+                            .then(() => {
+                              setItems((prev) =>
+                                prev.map((it) =>
+                                  it.id === id ? { ...it, folder: 'trash' } : it
+                                )
+                              )
+                              setSelectedId(null)
+                              setDetail(null)
+                              setComposeMode(null)
+                              toast.message('Перемещено в «Удалённые»', {
+                                action: {
+                                  label: 'Отменить',
+                                  onClick: () => {
+                                    void window.kontur.mail
+                                      .move({ itemIds: [id], folderId: prevFolder })
+                                      .then(() => {
+                                        setItems((prev) =>
+                                          prev.map((it) =>
+                                            it.id === id ? { ...it, folder: prevFolder } : it
+                                          )
                                         )
+                                      })
+                                      .catch((e) =>
+                                        toast.error(e instanceof Error ? e.message : String(e))
                                       )
-                                    })
-                                    .catch((e) =>
-                                      toast.error(e instanceof Error ? e.message : String(e))
-                                    )
+                                  }
                                 }
-                              }
+                              })
                             })
-                          })
-                          .catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
-                      }}
-                    >
-                      <Trash2 />
-                      Удалить
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        setComposeMode((m) => (m === 'reply' ? null : 'reply'))
-                      }
-                    >
-                      <Reply />
-                      Ответить
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        setComposeMode((m) => (m === 'replyAll' ? null : 'replyAll'))
-                      }
-                    >
-                      <ReplyAll />
-                      Всем
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        setComposeMode((m) => (m === 'forward' ? null : 'forward'))
-                      }
-                    >
-                      <Forward />
-                      Переслать
-                    </Button>
+                            .catch((e) =>
+                              toast.error(e instanceof Error ? e.message : String(e))
+                            )
+                        }}
+                      >
+                        <Trash2 />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant={composeMode === 'reply' ? 'secondary' : 'ghost'}
+                        title="Ответить"
+                        onClick={() =>
+                          setComposeMode((m) => (m === 'reply' ? null : 'reply'))
+                        }
+                      >
+                        <Reply />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant={composeMode === 'replyAll' ? 'secondary' : 'ghost'}
+                        title="Ответить всем"
+                        onClick={() =>
+                          setComposeMode((m) => (m === 'replyAll' ? null : 'replyAll'))
+                        }
+                      >
+                        <ReplyAll />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant={composeMode === 'forward' ? 'secondary' : 'ghost'}
+                        title="Переслать"
+                        onClick={() =>
+                          setComposeMode((m) => (m === 'forward' ? null : 'forward'))
+                        }
+                      >
+                        <Forward />
+                      </Button>
+                    </div>
                   </div>
                   <div className="mt-2 space-y-0.5 text-[13px]">
                     <div>
