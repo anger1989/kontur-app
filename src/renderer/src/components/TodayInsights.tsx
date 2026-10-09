@@ -551,6 +551,23 @@ function CapacityDialog({
   )
 }
 
+/** Поля, от которых зависит computeInsights — markRead письма их не трогает. */
+function taskInsightKey(it: Item): string {
+  return `${it.id}\0${it.updatedAt}\0${it.state ?? ''}\0${it.body}`
+}
+
+function eventInsightKey(it: Item): string {
+  return `${it.id}\0${it.startsAt}\0${it.endsAt}\0${it.state ?? ''}\0${it.body}`
+}
+
+function sameInsightItems(prev: Item[], next: Item[], key: (it: Item) => string): boolean {
+  if (prev.length !== next.length) return false
+  const a = prev.map(key).sort()
+  const b = next.map(key).sort()
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
 export function TodayInsights({
   bare,
   variant = 'strip'
@@ -569,12 +586,25 @@ export function TodayInsights({
   const [events, setEvents] = useState<Item[]>([])
 
   useEffect(() => {
+    let cancelled = false
     const load = (): void => {
-      void window.kontur.items.query({ kinds: ['task'], limit: 500 }).then(setTasks)
-      void window.kontur.items.query({ kinds: ['event'], limit: 2000 }).then(setEvents)
+      // itemsChanged общий (в т.ч. markRead mail) — без сравнения снимок
+      // tasks/events каждый тик setState'ил карточку и дёргал стол.
+      void window.kontur.items.query({ kinds: ['task'], limit: 500 }).then((list) => {
+        if (cancelled) return
+        setTasks((prev) => (sameInsightItems(prev, list, taskInsightKey) ? prev : list))
+      })
+      void window.kontur.items.query({ kinds: ['event'], limit: 2000 }).then((list) => {
+        if (cancelled) return
+        setEvents((prev) => (sameInsightItems(prev, list, eventInsightKey) ? prev : list))
+      })
     }
     load()
-    return window.kontur.items.onChange(load)
+    const off = window.kontur.items.onChange(load)
+    return (): void => {
+      cancelled = true
+      off()
+    }
   }, [])
 
   const spFieldHint = useMemo(() => {

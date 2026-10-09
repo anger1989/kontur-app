@@ -50,8 +50,10 @@ export function TodayMeetingsCarousel({
   const lastFocusId = useRef<string | null>(null)
 
   useEffect(() => {
+    let cancelled = false
     const load = (): void => {
       void window.kontur.items.query({ kinds: ['event'], limit: 2000 }).then((list) => {
+        if (cancelled) return
         const day0 = startOfDay(Date.now())
         const day1 = day0 + 86_400_000
         // Отменённые, отклонённые и приглашения-дубли на сегодня уже не
@@ -68,11 +70,30 @@ export function TodayMeetingsCarousel({
             )
             .sort((a, b) => (a.startsAt ?? 0) - (b.startsAt ?? 0))
         )
-        setEvents(today)
+        setEvents((prev) => {
+          if (
+            prev.length === today.length &&
+            prev.every(
+              (e, i) =>
+                e.id === today[i]!.id &&
+                e.startsAt === today[i]!.startsAt &&
+                e.endsAt === today[i]!.endsAt &&
+                e.state === today[i]!.state &&
+                e.title === today[i]!.title
+            )
+          ) {
+            return prev
+          }
+          return today
+        })
       })
     }
     load()
-    return window.kontur.items.onChange(load)
+    const off = window.kontur.items.onChange(load)
+    return (): void => {
+      cancelled = true
+      off()
+    }
   }, [])
 
   // Тикаем раз в минуту — смена «сейчас / прошло / далее» и автоскролл.

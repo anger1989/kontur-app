@@ -555,10 +555,17 @@ export function TodayWidgets(): JSX.Element | null {
   // Высота виджета — самой карточки (GlowCell), без GLOW_PAD-обёртки.
   // Иначе вертикальный зазор получается WIDGET_GAP + 2×GLOW_PAD, а горизонтальный
   // остаётся WIDGET_GAP — визуально «по вертикали шире».
+  //
+  // Debounce: AnimatedList exit у «Требует внимания» меняет offsetHeight
+  // десятки раз за кадр — без склейки placeWidgets дёргает всю колонку
+  // (в т.ч. статистику, у которой контент не менялся).
   useLayoutEffect(() => {
     const el = box.current
     if (!el) return
-    const measure = (): void => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let raf = 0
+
+    const apply = (): void => {
       const next: Record<string, number> = {}
       for (const c of Array.from(el.children) as HTMLElement[]) {
         const id = c.dataset.widget
@@ -573,14 +580,28 @@ export function TodayWidgets(): JSX.Element | null {
         return same ? prev : next
       })
     }
-    measure()
-    const ro = new ResizeObserver(measure)
+
+    const schedule = (): void => {
+      if (raf) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(apply, 120)
+      })
+    }
+
+    apply()
+    const ro = new ResizeObserver(schedule)
     for (const c of Array.from(el.children)) {
       ro.observe(c)
       const card = (c as HTMLElement).querySelector('[data-widget-card]')
       if (card) ro.observe(card)
     }
-    return () => ro.disconnect()
+    return (): void => {
+      if (timer) clearTimeout(timer)
+      if (raf) cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
   }, [visibilityKey])
   /** Виджет, который тащат прямо сейчас: позиция живёт в state, не в конфиге. */
   const [drag, setDrag] = useState<{ id: WidgetId; x: number; y: number } | null>(null)

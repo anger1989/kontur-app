@@ -265,7 +265,11 @@ export function StatsCard({
           <AnimatedNumber value={value} prefix={valuePrefix} postfix={valuePostfix} />
         </p>
         {description && (
-          <p className="mt-1 text-[12px] leading-snug text-muted-foreground">{description}</p>
+          // min-h на 2 строки: иначе при узкой колонке 1↔2 строки прыгает
+          // высота карточки и placeWidgets сдвигает соседей на столе.
+          <p className="mt-1 min-h-[2.5em] text-[12px] leading-snug text-muted-foreground">
+            {description}
+          </p>
         )}
       </div>
 
