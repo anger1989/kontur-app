@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS items (
   updated_at  INTEGER NOT NULL,
   unread      INTEGER NOT NULL DEFAULT 0,
   mentioned   INTEGER NOT NULL DEFAULT 0,
+  flagged     INTEGER NOT NULL DEFAULT 0,
   starts_at   INTEGER,
   ends_at     INTEGER,
   folder      TEXT
@@ -122,6 +123,7 @@ function migrate(d: Database.Database): void {
   if (!cols.has('starts_at')) d.exec('ALTER TABLE items ADD COLUMN starts_at INTEGER')
   if (!cols.has('ends_at')) d.exec('ALTER TABLE items ADD COLUMN ends_at INTEGER')
   if (!cols.has('folder')) d.exec('ALTER TABLE items ADD COLUMN folder TEXT')
+  if (!cols.has('flagged')) d.exec('ALTER TABLE items ADD COLUMN flagged INTEGER NOT NULL DEFAULT 0')
   // Письма, синкнутые до появления folder, считаем входящими — иначе
   // фильтр «Входящие» их видит, а Sent/Drafts остаются «пустыми» в UI.
   d.exec(`UPDATE items SET folder = 'inbox' WHERE kind = 'mail' AND folder IS NULL`)
@@ -144,6 +146,7 @@ const rowToItem = (r: Record<string, unknown>): Item => ({
   updatedAt: r.updated_at as number,
   unread: Boolean(r.unread),
   mentioned: Boolean(r.mentioned),
+  flagged: Boolean(r.flagged),
   startsAt: (r.starts_at as number) ?? null,
   endsAt: (r.ends_at as number) ?? null,
   folder: (r.folder as string) ?? null
@@ -165,8 +168,8 @@ export function upsertItems(items: Item[]): Item[] {
   const fresh = items.filter((it) => !existing.has(it.id))
 
   const stmt = conn().prepare(`
-    INSERT INTO items (id, env_id, service_id, kind, title, body, author, state, url, updated_at, unread, mentioned, starts_at, ends_at, folder)
-    VALUES (@id, @envId, @serviceId, @kind, @title, @body, @author, @state, @url, @updatedAt, @unread, @mentioned, @startsAt, @endsAt, @folder)
+    INSERT INTO items (id, env_id, service_id, kind, title, body, author, state, url, updated_at, unread, mentioned, flagged, starts_at, ends_at, folder)
+    VALUES (@id, @envId, @serviceId, @kind, @title, @body, @author, @state, @url, @updatedAt, @unread, @mentioned, @flagged, @startsAt, @endsAt, @folder)
     ON CONFLICT(id) DO UPDATE SET
       title=excluded.title,
       body=CASE WHEN length(excluded.body) > 0 THEN excluded.body ELSE items.body END,
@@ -187,6 +190,8 @@ export function upsertItems(items: Item[]): Item[] {
           THEN 0
         ELSE excluded.mentioned
       END,
+      -- Звезда локальная: синк не сбрасывает.
+      flagged=items.flagged,
       starts_at=excluded.starts_at, ends_at=excluded.ends_at, folder=excluded.folder
   `)
   const tx = conn().transaction((rows: Item[]) => {
@@ -195,6 +200,7 @@ export function upsertItems(items: Item[]): Item[] {
         ...it,
         unread: it.unread ? 1 : 0,
         mentioned: it.mentioned ? 1 : 0,
+        flagged: it.flagged ? 1 : 0,
         startsAt: it.startsAt ?? null,
         endsAt: it.endsAt ?? null,
         folder: it.folder ?? null
@@ -254,6 +260,32 @@ export function markItemsRead(ids: string[]): number {
     return n
   })
   return tx(ids)
+}
+
+/** Вернуть непрочитанность (локально). */
+export function markItemsUnread(ids: string[]): number {
+  if (!ids.length) return 0
+  const stmt = conn().prepare(
+    `UPDATE items SET unread = 1, state = CASE WHEN state = 'прочитано' THEN NULL ELSE state END
+     WHERE id = ? AND unread = 0`
+  )
+  const tx = conn().transaction((list: string[]) => {
+    let n = 0
+    for (const id of list) {
+      const r = stmt.run(id)
+      n += r.changes
+    }
+    return n
+  })
+  return tx(ids)
+}
+
+/** Локальная звезда на письме. */
+export function setItemFlagged(id: string, flagged: boolean): boolean {
+  const r = conn()
+    .prepare('UPDATE items SET flagged = ? WHERE id = ?')
+    .run(flagged ? 1 : 0, id)
+  return r.changes > 0
 }
 
 /** Все непрочитанные/упомянутые элементы сервиса данного вида, которых нет в keepIds. */
@@ -333,7 +365,7 @@ export function queryItems(q: ItemQuery = {}): Item[] {
   if (q.mentionedOnly) where.push('mentioned = 1')
   const bodyExpr = q.mode === 'full' ? 'body' : `substr(body, 1, ${LIST_BODY_CHARS}) AS body`
   const sql = `SELECT id, env_id, service_id, kind, title, ${bodyExpr}, author, state, url,
-                      updated_at, unread, mentioned, starts_at, ends_at, folder
+                      updated_at, unread, mentioned, flagged, starts_at, ends_at, folder
                FROM items ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
                ORDER BY updated_at DESC LIMIT ?`
   params.push(q.limit ?? 200)

@@ -298,20 +298,25 @@ export async function fetchEwsMessage(
 /** Отправка письма через EWS CreateItem + SendAndSaveCopy. */
 export async function sendEwsMail(
   ctx: SyncContext,
-  payload: { to: string; cc?: string; subject: string; body: string }
+  payload: {
+    to: string
+    cc?: string
+    bcc?: string
+    subject: string
+    body: string
+    inReplyTo?: string
+  }
 ): Promise<void> {
-  const toXml = payload.to
-    .split(/[,;]/)
-    .map((a) => a.trim())
-    .filter(Boolean)
-    .map((a) => `<t:Mailbox><t:EmailAddress>${escapeXml(a)}</t:EmailAddress></t:Mailbox>`)
-    .join('')
-  const ccXml = (payload.cc ?? '')
-    .split(/[,;]/)
-    .map((a) => a.trim())
-    .filter(Boolean)
-    .map((a) => `<t:Mailbox><t:EmailAddress>${escapeXml(a)}</t:EmailAddress></t:Mailbox>`)
-    .join('')
+  const boxXml = (raw: string): string =>
+    raw
+      .split(/[,;]/)
+      .map((a) => a.trim())
+      .filter(Boolean)
+      .map((a) => `<t:Mailbox><t:EmailAddress>${escapeXml(a)}</t:EmailAddress></t:Mailbox>`)
+      .join('')
+  const toXml = boxXml(payload.to)
+  const ccXml = boxXml(payload.cc ?? '')
+  const bccXml = boxXml(payload.bcc ?? '')
   await soap(
     ctx,
     `<m:CreateItem MessageDisposition="SendAndSaveCopy">
@@ -320,8 +325,10 @@ export async function sendEwsMail(
         <t:Message>
           <t:Subject>${escapeXml(payload.subject)}</t:Subject>
           <t:Body BodyType="Text">${escapeXml(payload.body)}</t:Body>
+          ${payload.inReplyTo ? `<t:InReplyTo>${escapeXml(payload.inReplyTo)}</t:InReplyTo>` : ''}
           <t:ToRecipients>${toXml}</t:ToRecipients>
           ${ccXml ? `<t:CcRecipients>${ccXml}</t:CcRecipients>` : ''}
+          ${bccXml ? `<t:BccRecipients>${bccXml}</t:BccRecipients>` : ''}
         </t:Message>
       </m:Items>
     </m:CreateItem>`
@@ -334,7 +341,8 @@ const escapeXml = (s: string): string =>
 const ROLE_BY_DISTINGUISHED: Record<string, MailMailbox['role']> = {
   inbox: 'inbox',
   sentitems: 'sent',
-  drafts: 'drafts'
+  drafts: 'drafts',
+  deleteditems: 'trash'
 }
 
 /** Список папок через EWS FindFolder (msgfolderroot). */

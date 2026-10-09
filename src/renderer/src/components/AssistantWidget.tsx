@@ -62,7 +62,8 @@ export function AssistantWidget({ bare }: { bare?: boolean } = {}): JSX.Element 
 
       <div className="relative h-[220px] overflow-hidden rounded-xl ring-1 ring-black/20 dark:ring-white/10">
         <LiveTerminal
-          className="h-full [&_.xterm]:text-[12px]"
+          className="h-full"
+          fontSize={12}
           sessionKey={ASSISTANT_SESSION_KEY}
           profile="agent"
           keepAlive

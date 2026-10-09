@@ -314,6 +314,7 @@ async function calendarFor(
 
 function humanizeChangeError(msg: string, verb: string): string {
   const code = /Status=(\d+)/i.exec(msg)?.[1]
+  if (code === '4') return `Сервер отклонил запрос (ошибка протокола) — ${verb} не удалось.`
   if (code === '6') return `Сервер отклонил изменения (ошибка формата данных) — ${verb} не удалось.`
   if (code === '7') return 'Встречу одновременно изменили на сервере. Обновите календарь и повторите.'
   if (code === '8') return 'Встреча уже удалена на сервере. Обновите календарь.'

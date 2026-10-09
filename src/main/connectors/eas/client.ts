@@ -476,8 +476,8 @@ export class EasClient {
     return findAll(resp, 'Properties')[0] ?? findAll(resp, 'Fetch').find((f) => findAll(f, 'Body').length) ?? null
   }
 
-  /** Пометить письмо прочитанным через Sync/Change (Read=1). */
-  async markRead(collectionId: string, serverId: string): Promise<void> {
+  /** Пометить письмо прочитанным/непрочитанным через Sync/Change (Read=1|0). */
+  async markRead(collectionId: string, serverId: string, read = true): Promise<void> {
     const syncKey = await this.primeSync(collectionId)
     if (syncKey === '0') throw new Error('EAS: нет SyncKey для markRead')
     const doc = el(0, 'Sync', [
@@ -488,7 +488,7 @@ export class EasClient {
           el(0, 'Commands', [
             el(0, 'Change', [
               el(0, 'ServerId', serverId),
-              el(0, 'ApplicationData', [el(2, 'Read', '1')])
+              el(0, 'ApplicationData', [el(2, 'Read', read ? '1' : '0')])
             ])
           ])
         ])
@@ -657,11 +657,14 @@ export class EasClient {
     return status
   }
 
-  /** ISO-дата вхождения для airsyncbase:InstanceId из компактного ключа (20261007T100000Z). */
-  private static instanceIso(compact: string): string | null {
-    const ms = parseCompactToMs(compact)
-    if (ms == null) return null
-    return new Date(ms).toISOString()
+  /**
+   * airsyncbase:InstanceId в Sync Change/Delete — Compact DateTime
+   * (MS-ASAIRS / MS-ASDTYPE 2.7.2): `20261009T130000Z`. ISO с дефисами/
+   * миллисекундами Exchange отвечает Status=4 (protocol error) — так и
+   * валился перенос вхождения серии.
+   */
+  private static instanceCompactOrNull(compact: string): string | null {
+    return parseCompactToMs(compact) != null ? compact : null
   }
 
   /**
@@ -676,8 +679,8 @@ export class EasClient {
     instanceCompact?: string
   ): Promise<void> {
     const children: El[] = [el(0, 'ServerId', serverId)]
-    const iso = instanceCompact ? EasClient.instanceIso(instanceCompact) : null
-    if (iso) children.push(el(17, 'InstanceId', iso))
+    const occ = instanceCompact ? EasClient.instanceCompactOrNull(instanceCompact) : null
+    if (occ) children.push(el(17, 'InstanceId', occ))
     children.push(applicationData)
     const status = await this.syncCommand(collectionId, el(0, 'Change', children))
     if (status !== '1') throw new Error(`EAS Sync Change Status=${status}`)
@@ -689,8 +692,8 @@ export class EasClient {
    */
   async syncDelete(collectionId: string, serverId: string, instanceCompact?: string): Promise<void> {
     const children: El[] = [el(0, 'ServerId', serverId)]
-    const iso = instanceCompact ? EasClient.instanceIso(instanceCompact) : null
-    if (iso) children.push(el(17, 'InstanceId', iso))
+    const occ = instanceCompact ? EasClient.instanceCompactOrNull(instanceCompact) : null
+    if (occ) children.push(el(17, 'InstanceId', occ))
     const status = await this.syncCommand(collectionId, el(0, 'Delete', children))
     // 8 — уже удалена на сервере: цель достигнута.
     if (status !== '1' && status !== '8') throw new Error(`EAS Sync Delete Status=${status}`)

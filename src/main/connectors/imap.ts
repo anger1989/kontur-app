@@ -26,6 +26,7 @@ function specialUseRole(flag?: string | null): MailFolder | null {
   if (flag === '\\Inbox' || flag === 'INBOX') return 'inbox'
   if (flag === '\\Sent') return 'sent'
   if (flag === '\\Drafts') return 'drafts'
+  if (flag === '\\Trash' || flag === '\\Deleted') return 'trash'
   return null
 }
 
@@ -89,6 +90,10 @@ export async function moveImapMessages(
       if (id === 'inbox' || id.toUpperCase() === 'INBOX') return 'INBOX'
       if (id === 'sent') return boxes.find((b) => b.specialUse === '\\Sent')?.path ?? id
       if (id === 'drafts') return boxes.find((b) => b.specialUse === '\\Drafts')?.path ?? id
+      if (id === 'trash' || id === 'deleted')
+        return (
+          boxes.find((b) => b.specialUse === '\\Trash' || b.specialUse === '\\Deleted')?.path ?? id
+        )
       return id
     }
     const dest = resolve(destination)
@@ -287,6 +292,35 @@ export async function fetchImapMessage(
       }
       if (!found) throw new Error('Письмо не найдено')
       return found
+    } finally {
+      lock.release()
+    }
+  } finally {
+    await client.logout().catch(() => {})
+  }
+}
+
+/** Снять \\Seen (пометить непрочитанным). nativeId = `folder:uid`. */
+export async function markImapUnread(ctx: SyncContext, nativeId: string): Promise<void> {
+  const i = nativeId.indexOf(':')
+  const folder = i < 0 ? 'inbox' : nativeId.slice(0, i)
+  const uid = Number(i < 0 ? nativeId : nativeId.slice(i + 1))
+  if (!Number.isFinite(uid)) throw new Error('Некорректный IMAP uid')
+  const client = imapClient(ctx)
+  await client.connect()
+  try {
+    let mailboxPath = folder === 'inbox' ? 'INBOX' : folder
+    if (folder === 'sent' || folder === 'drafts' || folder === 'trash') {
+      const boxes = await client.list()
+      const want =
+        folder === 'sent' ? '\\Sent' : folder === 'drafts' ? '\\Drafts' : '\\Trash'
+      mailboxPath =
+        boxes.find((b) => b.specialUse === want || (want === '\\Trash' && b.specialUse === '\\Deleted'))
+          ?.path ?? mailboxPath
+    }
+    const lock = await client.getMailboxLock(mailboxPath)
+    try {
+      await client.messageFlagsRemove(String(uid), ['\\Seen'], { uid: true })
     } finally {
       lock.release()
     }

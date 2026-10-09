@@ -6,14 +6,18 @@ import {
   Folder,
   FolderInput,
   FolderPlus,
+  Forward,
   Inbox,
   ListFilter,
   Mail as MailIcon,
+  MailOpen,
   PenSquare,
   RefreshCw,
   Reply,
+  ReplyAll,
   Search,
   Send,
+  Star,
   Trash2,
   X
 } from 'lucide-react'
@@ -60,15 +64,69 @@ const DATE_FILTER_LABEL: Record<DateFilter, string> = {
 const FOLDER_LABEL: Record<MailFolder, string> = {
   inbox: 'Входящие',
   sent: 'Отправленные',
-  drafts: 'Черновики'
+  drafts: 'Черновики',
+  trash: 'Удалённые'
 }
 
-const FOLDER_ORDER: MailFolder[] = ['inbox', 'sent', 'drafts']
+const FOLDER_ORDER: MailFolder[] = ['inbox', 'sent', 'drafts', 'trash']
 
 const FOLDER_ICON: Record<MailFolder, typeof Inbox> = {
   inbox: Inbox,
   sent: Send,
-  drafts: FilePenLine
+  drafts: FilePenLine,
+  trash: Trash2
+}
+
+type ComposeMode = 'reply' | 'replyAll' | 'forward'
+
+/** Адреса из строки To/Cc («Name <a@b.ru>, c@d.ru»). */
+function parseAddressList(raw: string): string[] {
+  if (!raw.trim()) return []
+  const out: string[] = []
+  for (const part of raw.split(/[,;]/)) {
+    const email = extractEmail(part.trim())
+    if (email && email.includes('@')) out.push(email)
+  }
+  return out
+}
+
+function normalizeAddr(email: string): string {
+  return email.trim().toLowerCase()
+}
+
+/** Outlook-like: reply / replyAll / forward. */
+function buildReplyRecipients(
+  detail: MailDetail,
+  mode: ComposeMode,
+  selfEmails: string[]
+): { to: string; cc: string } {
+  const self = new Set(selfEmails.map(normalizeAddr).filter(Boolean))
+  const from = extractEmail(detail.from)
+  if (mode === 'forward') return { to: '', cc: '' }
+  if (mode === 'reply') return { to: from, cc: '' }
+
+  const toList = parseAddressList(detail.to)
+  const ccList = parseAddressList(detail.cc)
+  const exclude = new Set([...self, normalizeAddr(from)])
+  const cc = [...toList, ...ccList]
+    .filter((a) => !exclude.has(normalizeAddr(a)))
+    .filter((a, i, arr) => arr.findIndex((b) => normalizeAddr(b) === normalizeAddr(a)) === i)
+  return { to: from, cc: cc.join(', ') }
+}
+
+function stripSubjectPrefix(subject: string, kind: 're' | 'fwd'): string {
+  const re = kind === 're' ? /^(Re:\s*)+/i : /^(Fwd:\s*|Fw:\s*)+/i
+  return subject.replace(re, '').trim()
+}
+
+function buildQuote(detail: MailDetail): string {
+  const when = new Date(detail.date).toLocaleString('ru-RU')
+  const body = detail.bodyText.trim() || '(нет текста)'
+  const quoted = body
+    .split(/\r?\n/)
+    .map((l) => `> ${l}`)
+    .join('\n')
+  return `\n\n\n———\n${detail.from} · ${when}\nТема: ${detail.subject}\n\n${quoted}`
 }
 
 function formatWhen(ts: number): string {
@@ -185,7 +243,7 @@ export function Mail({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<MailDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
-  const [replyOpen, setReplyOpen] = useState(false)
+  const [composeMode, setComposeMode] = useState<ComposeMode | null>(null)
   const [composeOpen, setComposeOpen] = useState(false)
   const [sending, setSending] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -262,26 +320,36 @@ export function Mail({
     const q = query.trim().toLowerCase()
     const since = dateCutoff(dateFilter)
     const roleOfFilter =
-      folderFilter === 'inbox' || folderFilter === 'sent' || folderFilter === 'drafts'
-        ? folderFilter
+      folderFilter === 'inbox' ||
+      folderFilter === 'sent' ||
+      folderFilter === 'drafts' ||
+      folderFilter === 'trash'
+        ? (folderFilter as MailFolder)
         : mailboxes.find((m) => m.id === folderFilter)?.role ?? null
-    return items.filter((it) => {
-      const itemFolder = it.folder ?? 'inbox'
-      const match =
-        itemFolder === folderFilter ||
-        (roleOfFilter != null && itemFolder === roleOfFilter) ||
-        (mailboxes.some((m) => m.id === folderFilter && m.role === itemFolder))
-      if (!match) return false
-      if (readFilter === 'unread' && !it.unread) return false
-      if (readFilter === 'read' && it.unread) return false
-      if (since != null && it.updatedAt < since) return false
-      if (!q) return true
-      return (
-        it.title.toLowerCase().includes(q) ||
-        (it.author ?? '').toLowerCase().includes(q) ||
-        it.body.toLowerCase().includes(q)
-      )
-    })
+    return items
+      .filter((it) => {
+        const itemFolder = it.folder ?? 'inbox'
+        const match =
+          itemFolder === folderFilter ||
+          (roleOfFilter != null && itemFolder === roleOfFilter) ||
+          mailboxes.some((m) => m.id === folderFilter && m.role === itemFolder)
+        if (!match) return false
+        if (readFilter === 'unread' && !it.unread) return false
+        if (readFilter === 'read' && it.unread) return false
+        if (since != null && it.updatedAt < since) return false
+        if (!q) return true
+        return (
+          it.title.toLowerCase().includes(q) ||
+          (it.author ?? '').toLowerCase().includes(q) ||
+          it.body.toLowerCase().includes(q)
+        )
+      })
+      .sort((a, b) => {
+        const af = a.flagged ? 1 : 0
+        const bf = b.flagged ? 1 : 0
+        if (af !== bf) return bf - af
+        return b.updatedAt - a.updatedAt
+      })
   }, [items, query, readFilter, dateFilter, folderFilter, mailboxes])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
@@ -294,7 +362,7 @@ export function Mail({
 
   const openMail = async (id: string): Promise<void> => {
     setSelectedId(id)
-    setReplyOpen(false)
+    setComposeMode(null)
     setComposeOpen(false)
     setLoadingDetail(true)
     setDetail(null)
@@ -359,7 +427,7 @@ export function Mail({
     setFolderFilter(id)
     setSelectedId(null)
     setDetail(null)
-    setReplyOpen(false)
+    setComposeMode(null)
     setComposeOpen(false)
   }
 
@@ -434,7 +502,7 @@ export function Mail({
           size="sm"
           onClick={() => {
             setComposeOpen(true)
-            setReplyOpen(false)
+            setComposeMode(null)
             setSelectedId(null)
             setDetail(null)
           }}
@@ -593,12 +661,10 @@ export function Mail({
                     const env = config?.envs.find((e) => e.id === it.envId)
                     const active = selectedId === it.id
                     return (
-                      <button
+                      <div
                         key={it.id}
-                        type="button"
-                        onClick={() => void openMail(it.id)}
                         className={cn(
-                          'grid w-full grid-cols-[8px_minmax(0,1fr)_auto] items-start gap-x-2 border-l-[3px] px-3 py-2.5 text-left transition-colors',
+                          'grid w-full grid-cols-[8px_minmax(0,1fr)_auto] items-start gap-x-2 border-l-[3px] px-3 py-2.5 transition-colors',
                           active ? 'bg-accent' : 'hover:bg-accent/50'
                         )}
                         style={{ borderLeftColor: env?.accent ?? 'transparent' }}
@@ -607,14 +673,23 @@ export function Mail({
                           className="mt-1.5 size-2 shrink-0 rounded-full"
                           style={{ background: it.unread ? env?.accent : 'transparent' }}
                         />
-                        <div className="min-w-0 overflow-hidden">
-                          <div
-                            className={cn(
-                              'truncate text-[13px]',
-                              it.unread ? 'font-semibold text-foreground' : 'text-foreground/90'
-                            )}
-                          >
-                            {it.author ?? 'без отправителя'}
+                        <button
+                          type="button"
+                          onClick={() => void openMail(it.id)}
+                          className="min-w-0 overflow-hidden text-left"
+                        >
+                          <div className="flex min-w-0 items-center gap-1">
+                            <div
+                              className={cn(
+                                'min-w-0 truncate text-[13px]',
+                                it.unread ? 'font-semibold text-foreground' : 'text-foreground/90'
+                              )}
+                            >
+                              {it.author ?? 'без отправителя'}
+                            </div>
+                            {it.flagged ? (
+                              <Star className="size-3 shrink-0 fill-[var(--warning)] text-[var(--warning)]" />
+                            ) : null}
                           </div>
                           <div className="flex min-w-0 items-center gap-1.5">
                             <span
@@ -639,23 +714,45 @@ export function Mail({
                               {it.body}
                             </div>
                           ) : null}
+                        </button>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <button
+                            type="button"
+                            title={it.flagged ? 'Снять флаг' : 'Флаг'}
+                            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const next = !it.flagged
+                              void window.kontur.mail.setFlagged(it.id, next)
+                              setItems((prev) =>
+                                prev.map((x) => (x.id === it.id ? { ...x, flagged: next } : x))
+                              )
+                            }}
+                          >
+                            <Star
+                              className={cn(
+                                'size-3.5',
+                                it.flagged && 'fill-[var(--warning)] text-[var(--warning)]'
+                              )}
+                            />
+                          </button>
+                          <time
+                            dateTime={
+                              Number.isFinite(it.updatedAt) && it.updatedAt > 0
+                                ? new Date(it.updatedAt).toISOString()
+                                : undefined
+                            }
+                            className="whitespace-nowrap text-right text-[11px] font-medium tabular-nums text-muted-foreground"
+                            title={
+                              Number.isFinite(it.updatedAt) && it.updatedAt > 0
+                                ? new Date(it.updatedAt).toLocaleString('ru-RU')
+                                : undefined
+                            }
+                          >
+                            {formatWhen(it.updatedAt)}
+                          </time>
                         </div>
-                        <time
-                          dateTime={
-                            Number.isFinite(it.updatedAt) && it.updatedAt > 0
-                              ? new Date(it.updatedAt).toISOString()
-                              : undefined
-                          }
-                          className="mt-0.5 shrink-0 whitespace-nowrap text-right text-[11px] font-medium tabular-nums text-muted-foreground"
-                          title={
-                            Number.isFinite(it.updatedAt) && it.updatedAt > 0
-                              ? new Date(it.updatedAt).toLocaleString('ru-RU')
-                              : undefined
-                          }
-                        >
-                          {formatWhen(it.updatedAt)}
-                        </time>
-                      </button>
+                      </div>
                     )
                   })}
                 </div>
@@ -718,13 +815,122 @@ export function Mail({
                     <h2 className="min-w-0 flex-1 text-[17px] leading-snug font-semibold">
                       {detail.subject}
                     </h2>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      title={selectedId && items.find((i) => i.id === selectedId)?.flagged ? 'Снять флаг' : 'Флаг'}
+                      onClick={() => {
+                        if (!selectedId) return
+                        const cur = items.find((i) => i.id === selectedId)
+                        const next = !cur?.flagged
+                        void window.kontur.mail.setFlagged(selectedId, next)
+                        setItems((prev) =>
+                          prev.map((it) => (it.id === selectedId ? { ...it, flagged: next } : it))
+                        )
+                      }}
+                    >
+                      <Star
+                        className={cn(
+                          items.find((i) => i.id === selectedId)?.flagged &&
+                            'fill-[var(--warning)] text-[var(--warning)]'
+                        )}
+                      />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      title="Непрочитанное"
+                      onClick={() => {
+                        if (!selectedId) return
+                        void window.kontur.mail.markUnread(selectedId)
+                        setItems((prev) =>
+                          prev.map((it) =>
+                            it.id === selectedId ? { ...it, unread: true, state: null } : it
+                          )
+                        )
+                        toast.message('Помечено как непрочитанное')
+                      }}
+                    >
+                      <MailOpen />
+                      Непрочит.
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => setMoveOpen(true)}>
                       <FolderInput />
                       Переместить
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => setReplyOpen((v) => !v)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        if (!selectedId) return
+                        const id = selectedId
+                        const prevFolder = items.find((i) => i.id === id)?.folder ?? 'inbox'
+                        void window.kontur.mail
+                          .move({ itemIds: [id], folderId: 'trash' })
+                          .then(() => {
+                            setItems((prev) =>
+                              prev.map((it) =>
+                                it.id === id ? { ...it, folder: 'trash' } : it
+                              )
+                            )
+                            setSelectedId(null)
+                            setDetail(null)
+                            setComposeMode(null)
+                            toast.message('Перемещено в «Удалённые»', {
+                              action: {
+                                label: 'Отменить',
+                                onClick: () => {
+                                  void window.kontur.mail
+                                    .move({ itemIds: [id], folderId: prevFolder })
+                                    .then(() => {
+                                      setItems((prev) =>
+                                        prev.map((it) =>
+                                          it.id === id ? { ...it, folder: prevFolder } : it
+                                        )
+                                      )
+                                    })
+                                    .catch((e) =>
+                                      toast.error(e instanceof Error ? e.message : String(e))
+                                    )
+                                }
+                              }
+                            })
+                          })
+                          .catch((e) => toast.error(e instanceof Error ? e.message : String(e)))
+                      }}
+                    >
+                      <Trash2 />
+                      Удалить
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setComposeMode((m) => (m === 'reply' ? null : 'reply'))
+                      }
+                    >
                       <Reply />
                       Ответить
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setComposeMode((m) => (m === 'replyAll' ? null : 'replyAll'))
+                      }
+                    >
+                      <ReplyAll />
+                      Всем
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setComposeMode((m) => (m === 'forward' ? null : 'forward'))
+                      }
+                    >
+                      <Forward />
+                      Переслать
                     </Button>
                   </div>
                   <div className="mt-2 space-y-0.5 text-[13px]">
@@ -750,16 +956,24 @@ export function Mail({
                   </div>
                 </div>
 
-                {replyOpen && (
-                  <ReplyPane
+                {composeMode && (
+                  <ComposeReplyPane
+                    key={`${detail.id}:${composeMode}`}
                     detail={detail}
+                    mode={composeMode}
+                    selfEmails={[
+                      config?.services.find((s) => s.id === detail.serviceId)?.options.email ?? '',
+                      config?.services.find((s) => s.id === detail.serviceId)?.auth.username ?? ''
+                    ]}
                     sending={sending}
                     setSending={setSending}
                     onSent={() => {
-                      setReplyOpen(false)
-                      toast.success('Ответ отправлен')
+                      setComposeMode(null)
+                      toast.success(
+                        composeMode === 'forward' ? 'Письмо переслано' : 'Ответ отправлен'
+                      )
                     }}
-                    onClose={() => setReplyOpen(false)}
+                    onClose={() => setComposeMode(null)}
                   />
                 )}
 
@@ -1131,37 +1345,62 @@ function RulesDialog({
   )
 }
 
-function ReplyPane({
+function ComposeReplyPane({
   detail,
+  mode,
+  selfEmails,
   sending,
   setSending,
   onSent,
   onClose
 }: {
   detail: MailDetail
+  mode: ComposeMode
+  selfEmails: string[]
   sending: boolean
   setSending: (v: boolean) => void
   onSent: () => void
   onClose: () => void
 }): JSX.Element {
-  const [body, setBody] = useState('')
-  const to = extractEmail(detail.from)
-  const subject = detail.subject.replace(/^(Re:\s*)+/i, '')
-  const reSubject = `Re: ${subject}`
+  const initial = buildReplyRecipients(detail, mode, selfEmails)
+  const [to, setTo] = useState(initial.to)
+  const [cc, setCc] = useState(initial.cc)
+  const [bcc, setBcc] = useState('')
+  const [showBcc, setShowBcc] = useState(false)
+  const baseSubject =
+    mode === 'forward'
+      ? `Fwd: ${stripSubjectPrefix(detail.subject, 'fwd')}`
+      : `Re: ${stripSubjectPrefix(detail.subject, 're')}`
+  const [subject, setSubject] = useState(baseSubject)
+  const [body, setBody] = useState(() => (mode === 'forward' ? buildQuote(detail).trimStart() : ''))
+
+  const title =
+    mode === 'reply' ? 'Ответить' : mode === 'replyAll' ? 'Ответить всем' : 'Переслать'
 
   const send = async (): Promise<void> => {
-    if (!body.trim()) {
+    if (!to.trim() && mode !== 'forward') {
+      toast.error('Укажите получателя')
+      return
+    }
+    if (mode === 'forward' && !to.trim()) {
+      toast.error('Укажите получателя')
+      return
+    }
+    if (!body.trim() && mode !== 'forward') {
       toast.error('Напишите текст ответа')
       return
     }
     setSending(true)
     try {
+      const quoted = mode === 'forward' ? body : `${body.trim()}${buildQuote(detail)}`
       await window.kontur.mail.send({
         serviceId: detail.serviceId,
-        to,
-        subject: reSubject,
-        body: body.trim(),
-        replyToId: detail.id
+        to: to.trim(),
+        cc: cc.trim() || undefined,
+        bcc: bcc.trim() || undefined,
+        subject: subject.trim() || baseSubject,
+        body: quoted,
+        replyToId: mode === 'forward' ? undefined : detail.id
       })
       onSent()
     } catch (e) {
@@ -1174,15 +1413,46 @@ function ReplyPane({
   return (
     <div className="shrink-0 border-b bg-muted/30 px-5 py-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[12px] font-medium">Ответ → {to || detail.from}</span>
-        <Button size="icon-xs" variant="ghost" onClick={onClose}>
-          <X />
-        </Button>
+        <span className="text-[12px] font-medium">{title}</span>
+        <div className="flex items-center gap-1">
+          {!showBcc && (
+            <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[11px]" onClick={() => setShowBcc(true)}>
+              Скрытая
+            </Button>
+          )}
+          <Button size="icon-xs" variant="ghost" onClick={onClose}>
+            <X />
+          </Button>
+        </div>
+      </div>
+      <div className="mb-2 space-y-1.5">
+        <label className="flex items-center gap-2 text-[12px]">
+          <span className="w-14 shrink-0 text-muted-foreground">Кому</span>
+          <RecipientInput value={to} onChange={setTo} className="h-8 text-[13px]" />
+        </label>
+        <label className="flex items-center gap-2 text-[12px]">
+          <span className="w-14 shrink-0 text-muted-foreground">Копия</span>
+          <RecipientInput value={cc} onChange={setCc} className="h-8 text-[13px]" />
+        </label>
+        {showBcc && (
+          <label className="flex items-center gap-2 text-[12px]">
+            <span className="w-14 shrink-0 text-muted-foreground">Скрытая</span>
+            <RecipientInput value={bcc} onChange={setBcc} className="h-8 text-[13px]" />
+          </label>
+        )}
+        <label className="flex items-center gap-2 text-[12px]">
+          <span className="w-14 shrink-0 text-muted-foreground">Тема</span>
+          <Input
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            className="h-8 text-[13px]"
+          />
+        </label>
       </div>
       <Textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
-        placeholder="Текст ответа…"
+        placeholder={mode === 'forward' ? 'Комментарий к пересылке…' : 'Текст ответа…'}
         className="min-h-24 text-[13px]"
         autoFocus
       />
@@ -1210,6 +1480,8 @@ function ComposePane({
   const [serviceId, setServiceId] = useState(services[0]?.id ?? '')
   const [to, setTo] = useState('')
   const [cc, setCc] = useState('')
+  const [bcc, setBcc] = useState('')
+  const [showBcc, setShowBcc] = useState(false)
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
 
@@ -1224,6 +1496,7 @@ function ComposePane({
         serviceId,
         to: to.trim(),
         cc: cc.trim() || undefined,
+        bcc: bcc.trim() || undefined,
         subject: subject.trim() || '(без темы)',
         body: body
       })
@@ -1240,9 +1513,21 @@ function ComposePane({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between border-b px-5 py-3">
         <h2 className="text-[15px] font-semibold">Новое письмо</h2>
-        <Button size="icon-sm" variant="ghost" onClick={onClose}>
-          <X />
-        </Button>
+        <div className="flex items-center gap-1">
+          {!showBcc && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => setShowBcc(true)}
+            >
+              Скрытая
+            </Button>
+          )}
+          <Button size="icon-sm" variant="ghost" onClick={onClose}>
+            <X />
+          </Button>
+        </div>
       </div>
       <div className="space-y-2 border-b px-5 py-3">
         {services.length > 1 && (
@@ -1275,6 +1560,12 @@ function ComposePane({
           <span className="w-14 shrink-0 text-muted-foreground">Копия</span>
           <RecipientInput value={cc} onChange={setCc} className="h-8 text-[13px]" />
         </label>
+        {showBcc && (
+          <label className="flex items-center gap-2 text-[12px]">
+            <span className="w-14 shrink-0 text-muted-foreground">Скрытая</span>
+            <RecipientInput value={bcc} onChange={setBcc} className="h-8 text-[13px]" />
+          </label>
+        )}
         <label className="flex items-center gap-2 text-[12px]">
           <span className="w-14 shrink-0 text-muted-foreground">Тема</span>
           <Input

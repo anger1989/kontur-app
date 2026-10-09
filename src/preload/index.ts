@@ -226,6 +226,8 @@ const api = {
     get: (id: string) => invoke<MailDetail>(CH.mailGet, id),
     send: (payload: MailSendPayload) => invoke<void>(CH.mailSend, payload),
     markRead: (id: string) => invoke<void>(CH.mailMarkRead, id),
+    markUnread: (id: string) => invoke<void>(CH.mailMarkUnread, id),
+    setFlagged: (id: string, flagged: boolean) => invoke<void>(CH.mailSetFlagged, id, flagged),
     listFolders: (opts?: { serviceId?: string; envId?: string }) =>
       invoke<MailMailbox[]>(CH.mailListFolders, opts ?? {}),
     listFoldersForRules: (opts?: { serviceId?: string; envId?: string }) =>

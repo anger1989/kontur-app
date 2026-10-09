@@ -78,6 +78,8 @@ export const CH = {
   mailGet: 'mail:get',
   mailSend: 'mail:send',
   mailMarkRead: 'mail:markRead',
+  mailMarkUnread: 'mail:markUnread',
+  mailSetFlagged: 'mail:setFlagged',
   mailListFolders: 'mail:listFolders',
   mailListFoldersForRules: 'mail:listFoldersForRules',
   mailCreateFolder: 'mail:createFolder',

@@ -510,6 +510,8 @@ export interface LiveTerminalProps {
   chrome?: boolean
   username?: string
   cwd?: string
+  /** Должен совпадать с рендером — иначе FitAddon врёт rows и курсор agent'а уезжает. */
+  fontSize?: number
   /**
    * Вкладки: неактивные остаются смонтированными (PTY живёт), но скрыты.
    * При активации — fit + focus.
@@ -535,6 +537,30 @@ export interface LiveTerminalProps {
   onExit?: (info: { exitCode: number; signal: number | null }) => void
 }
 
+/** Ждём ненулевой box — иначе FitAddon no-op и PTY стартует с дефолтом 80×24. */
+function waitForHostSize(el: HTMLElement, signal: AbortSignal): Promise<void> {
+  if (el.clientWidth >= 40 && el.clientHeight >= 40) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const done = (): void => {
+      ro.disconnect()
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }
+    const onAbort = (): void => {
+      ro.disconnect()
+      reject(new DOMException('aborted', 'AbortError'))
+    }
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth >= 40 && el.clientHeight >= 40) done()
+    })
+    ro.observe(el)
+    signal.addEventListener('abort', onAbort)
+    requestAnimationFrame(() => {
+      if (el.clientWidth >= 40 && el.clientHeight >= 40) done()
+    })
+  })
+}
+
 /**
  * Живой zsh / agent через node-pty + xterm, в визуале Aceternity Terminal.
  * Окно приложения даёт свой title bar — здесь `chrome={false}` по умолчанию.
@@ -549,6 +575,7 @@ export function LiveTerminal({
   chrome = false,
   username,
   cwd,
+  fontSize = 13,
   active = true,
   sessionKey,
   profile,
@@ -561,6 +588,7 @@ export function LiveTerminal({
   const termRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const sessionIdRef = useRef<string | null>(null)
+  const sizeRef = useRef({ cols: 0, rows: 0 })
   const keepAliveRef = useRef(keepAlive)
   keepAliveRef.current = keepAlive
   const onTitleRef = useRef(onTitle)
@@ -578,8 +606,10 @@ export function LiveTerminal({
       cursorBlink: true,
       cursorStyle: 'bar',
       fontFamily: "var(--font-mono), 'IBM Plex Mono', Menlo, monospace",
-      fontSize: 13,
-      lineHeight: 1.35,
+      fontSize,
+      // 1.0 — FitAddon считает rows по метрикам шрифта; lineHeight>1 раздувает
+      // визуал относительно fit и оставляет «пустой» низ с курсором.
+      lineHeight: 1,
       // macOS Option как Meta — привычные шорткаты шелла.
       macOptionIsMeta: true,
       allowTransparency: false,
@@ -611,8 +641,6 @@ export function LiveTerminal({
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(host)
-    fit.fit()
-    term.focus()
 
     termRef.current = term
     fitRef.current = fit
@@ -620,15 +648,35 @@ export function LiveTerminal({
     let disposed = false
     let offData: (() => void) | undefined
     let offExit: (() => void) | undefined
+    let roTimer: ReturnType<typeof setTimeout> | null = null
+    const ac = new AbortController()
+
+    const syncSize = (force = false): void => {
+      try {
+        fit.fit()
+      } catch {
+        return
+      }
+      const cols = term.cols
+      const rows = term.rows
+      if (!force && cols === sizeRef.current.cols && rows === sizeRef.current.rows) return
+      sizeRef.current = { cols, rows }
+      const id = sessionIdRef.current
+      if (id) void window.kontur.terminal.resize(id, cols, rows)
+      // Курсор agent'а часто на последней строке TUI — без scroll он «висит» в пустоте.
+      term.scrollToBottom()
+    }
 
     const boot = async (): Promise<void> => {
       try {
+        await waitForHostSize(host, ac.signal)
+        if (disposed) return
+        fit.fit()
+        sizeRef.current = { cols: term.cols, rows: term.rows }
+        term.focus()
+
         // Перезапуск только если seq ещё не применяли (не на каждый remount).
-        if (
-          sessionKey &&
-          restartToken > 0 &&
-          takeAssistantRestart(restartToken)
-        ) {
+        if (sessionKey && restartToken > 0 && takeAssistantRestart(restartToken)) {
           const prev = await window.kontur.terminal.create({
             cols: term.cols,
             rows: term.rows,
@@ -639,10 +687,9 @@ export function LiveTerminal({
           void window.kontur.terminal.kill(prev.id)
         }
 
-        const { cols, rows } = term
         const session = await window.kontur.terminal.create({
-          cols,
-          rows,
+          cols: term.cols,
+          rows: term.rows,
           cwd,
           key: sessionKey,
           profile
@@ -657,8 +704,15 @@ export function LiveTerminal({
         setTitle(initial)
         onTitleRef.current?.(shellName)
 
-        // Replay буфера — экран после свёртки в виджет / разворота в окно.
-        if (session.scrollback) term.write(session.scrollback)
+        // Сначала resize под хост — иначе replay/TUI рисуются в чужом 80×24.
+        syncSize(true)
+
+        // Agent TUI: replay ANSI со старым размером ломает курсор (виджет↔окно).
+        // SIGWINCH от resize выше заставляет agent перерисовать экран.
+        if (session.scrollback && !(session.reused && profile === 'agent')) {
+          term.write(session.scrollback)
+          term.scrollToBottom()
+        }
 
         term.onTitleChange((t) => {
           const next = t.trim() || shellName
@@ -685,14 +739,12 @@ export function LiveTerminal({
           if (id) void window.kontur.terminal.write(id, data)
         })
 
-        // После attach — подогнать размер под текущий хост.
-        try {
-          fit.fit()
-          void window.kontur.terminal.resize(session.id, term.cols, term.rows)
-        } catch {
-          /* ignore */
-        }
+        // Повторный fit после layout (шрифты/паддинги).
+        requestAnimationFrame(() => {
+          if (!disposed) syncSize(true)
+        })
       } catch (e) {
+        if (disposed || (e instanceof DOMException && e.name === 'AbortError')) return
         const msg = e instanceof Error ? e.message : String(e)
         setError(msg)
         term.writeln(`\x1b[31m${msg}\x1b[0m`)
@@ -702,18 +754,17 @@ export function LiveTerminal({
     void boot()
 
     const ro = new ResizeObserver(() => {
-      try {
-        fit.fit()
-        const id = sessionIdRef.current
-        if (id) void window.kontur.terminal.resize(id, term.cols, term.rows)
-      } catch {
-        /* ignore */
-      }
+      if (roTimer) clearTimeout(roTimer)
+      roTimer = setTimeout(() => {
+        if (!disposed) syncSize()
+      }, 50)
     })
     ro.observe(host)
 
     return () => {
       disposed = true
+      ac.abort()
+      if (roTimer) clearTimeout(roTimer)
       ro.disconnect()
       offData?.()
       offExit?.()
@@ -724,7 +775,7 @@ export function LiveTerminal({
       termRef.current = null
       fitRef.current = null
     }
-  }, [cwd, username, sessionKey, profile, restartToken])
+  }, [cwd, username, sessionKey, profile, restartToken, fontSize])
 
   // Вкладка снова видна — подогнать размер (пока была скрыта host 0×0) и фокус.
   useEffect(() => {
@@ -735,8 +786,12 @@ export function LiveTerminal({
     requestAnimationFrame(() => {
       try {
         fit.fit()
+        const cols = term.cols
+        const rows = term.rows
+        sizeRef.current = { cols, rows }
         const id = sessionIdRef.current
-        if (id) void window.kontur.terminal.resize(id, term.cols, term.rows)
+        if (id) void window.kontur.terminal.resize(id, cols, rows)
+        term.scrollToBottom()
         term.focus()
       } catch {
         /* ignore */
@@ -759,7 +814,8 @@ export function LiveTerminal({
           {error}
         </div>
       ) : null}
-      <div ref={hostRef} className="min-h-0 flex-1 p-2 [&_.xterm]:h-full [&_.xterm-viewport]:!overflow-auto" />
+      {/* Без h-full на .xterm: растягивание ячеек уводило курсор в «пустой» низ. */}
+      <div ref={hostRef} className="min-h-0 flex-1 overflow-hidden p-2 [&_.xterm-viewport]:!overflow-auto" />
     </div>
   )
 }

@@ -11,7 +11,7 @@ import type {
 } from '@shared/types'
 import { getConfig } from '../config/store'
 import { getSecret } from '../config/secrets'
-import { getItem, upsertItems } from '../db'
+import { getItem, markItemsUnread, setItemFlagged, upsertItems } from '../db'
 import type { SyncContext } from '../connectors/types'
 import { createEasClient, extractBody, find, text } from '../connectors/eas'
 import {
@@ -210,7 +210,35 @@ async function markReadOnServer(serviceId: string, nativeId: string): Promise<vo
     const client = await createEasClient(ctx)
     const folders = await client.folderSync()
     const inbox = folders.find((f) => f.type === '2')
-    if (inbox) await client.markRead(inbox.serverId, nativeId)
+    if (inbox) await client.markRead(inbox.serverId, nativeId, true)
+  }
+}
+
+async function markUnreadOnServer(
+  serviceId: string,
+  nativeId: string,
+  itemId: string
+): Promise<void> {
+  const ctx = contextFor(serviceId)
+  const protocol = protocolOf(ctx)
+  if (protocol === 'eas') {
+    const client = await createEasClient(ctx)
+    const folders = await client.folderSync()
+    const existing = getItem(itemId)
+    const role = (existing?.folder ?? 'inbox') as string
+    const folder =
+      folders.find((f) => f.serverId === role) ??
+      (role === 'sent'
+        ? folders.find((f) => f.type === '5')
+        : role === 'drafts'
+          ? folders.find((f) => f.type === '3')
+          : role === 'trash'
+            ? folders.find((f) => f.type === '4')
+            : folders.find((f) => f.type === '2'))
+    if (folder) await client.markRead(folder.serverId, stripFolderPrefix(nativeId, protocol), false)
+  } else if (protocol === 'imap') {
+    const { markImapUnread } = await import('../connectors/imap')
+    await markImapUnread(ctx, nativeId)
   }
 }
 
@@ -227,13 +255,19 @@ export async function sendMail(payload: MailSendPayload): Promise<void> {
     ''
   if (!from) throw new Error('Не задан адрес отправителя (email в настройках сервиса)')
 
+  const inReplyTo = payload.replyToId
+    ? `<${payload.replyToId.replace(/[^\w.@+-]/g, '_')}@kontur.local>`
+    : undefined
+
   if (protocol === 'eas') {
     const mime = buildMime({
       from,
       to: payload.to,
       cc: payload.cc,
+      bcc: payload.bcc,
       subject: payload.subject,
-      body: payload.body
+      body: payload.body,
+      inReplyTo
     })
     const client = await createEasClient(ctx)
     await client.sendMail(mime, randomUUID().replace(/-/g, '').slice(0, 16))
@@ -244,8 +278,10 @@ export async function sendMail(payload: MailSendPayload): Promise<void> {
     await sendEwsMail(ctx, {
       to: payload.to,
       cc: payload.cc,
+      bcc: payload.bcc,
       subject: payload.subject,
-      body: payload.body
+      body: payload.body,
+      inReplyTo
     })
     return
   }
@@ -265,8 +301,10 @@ export async function sendMail(payload: MailSendPayload): Promise<void> {
     from,
     to: payload.to,
     cc: payload.cc,
+    bcc: payload.bcc,
     subject: payload.subject,
-    body: payload.body
+    body: payload.body,
+    inReplyTo
   })
 }
 
@@ -278,18 +316,37 @@ export function markMailRead(itemId: string): void {
   emitItemsChanged()
 }
 
+/** Пометить непрочитанным локально + best-effort на сервере. */
+export function markMailUnread(itemId: string): void {
+  const n = markItemsUnread([itemId])
+  if (n > 0) emitItemsChanged()
+  const { serviceId, nativeId } = parseMailId(itemId)
+  void markUnreadOnServer(serviceId, nativeId, itemId).catch(() => {})
+}
+
+/** Локальная звезда. */
+export function setMailFlagged(itemId: string, flagged: boolean): void {
+  if (setItemFlagged(itemId, flagged)) emitItemsChanged()
+}
+
 function buildMime(p: {
   from: string
   to: string
   cc?: string
+  bcc?: string
   subject: string
   body: string
+  inReplyTo?: string
 }): string {
   const lines = [
     `From: ${p.from}`,
     `To: ${p.to}`,
     ...(p.cc?.trim() ? [`Cc: ${p.cc.trim()}`] : []),
+    ...(p.bcc?.trim() ? [`Bcc: ${p.bcc.trim()}`] : []),
     `Subject: ${encodeSubject(p.subject)}`,
+    ...(p.inReplyTo
+      ? [`In-Reply-To: ${p.inReplyTo}`, `References: ${p.inReplyTo}`]
+      : []),
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=utf-8',
     'Content-Transfer-Encoding: 8bit',
@@ -314,10 +371,16 @@ async function sendSmtp(opts: {
   from: string
   to: string
   cc?: string
+  bcc?: string
   subject: string
   body: string
+  inReplyTo?: string
 }): Promise<void> {
-  const recipients = [...opts.to.split(/[,;]/), ...(opts.cc ?? '').split(/[,;]/)]
+  const recipients = [
+    ...opts.to.split(/[,;]/),
+    ...(opts.cc ?? '').split(/[,;]/),
+    ...(opts.bcc ?? '').split(/[,;]/)
+  ]
     .map((a) => a.trim())
     .filter(Boolean)
 
@@ -384,8 +447,10 @@ async function sendSmtp(opts: {
       from: opts.from,
       to: opts.to,
       cc: opts.cc,
+      bcc: opts.bcc,
       subject: opts.subject,
-      body: opts.body
+      body: opts.body,
+      inReplyTo: opts.inReplyTo
     })
     socket.write(mime.replace(/^\./gm, '..') + '\r\n.\r\n')
     r = await read()
@@ -408,6 +473,7 @@ const EAS_MAIL_TYPES = new Set(['1', '2', '3', '4', '5', '6', '12'])
 function easRole(type: string): MailFolder | null {
   if (type === '2') return 'inbox'
   if (type === '3') return 'drafts'
+  if (type === '4') return 'trash'
   if (type === '5') return 'sent'
   return null
 }
@@ -504,7 +570,9 @@ export async function moveMail(opts: {
             ? folders.find((f) => f.type === '5')
             : destFolder === 'drafts'
               ? folders.find((f) => f.type === '3')
-              : undefined)
+              : destFolder === 'trash' || destFolder === 'deleted'
+                ? folders.find((f) => f.type === '4')
+                : undefined)
       if (!dst) throw new Error(`Папка назначения «${destFolder}» не найдена`)
 
       // Группируем по исходной папке (из локального item.folder).
@@ -519,7 +587,9 @@ export async function moveMail(opts: {
             ? folders.find((f) => f.type === '5')
             : role === 'drafts'
               ? folders.find((f) => f.type === '3')
-              : folders.find((f) => f.type === '2'))
+              : role === 'trash'
+                ? folders.find((f) => f.type === '4')
+                : folders.find((f) => f.type === '2'))
         if (!src) throw new Error('Исходная папка письма не найдена')
         const list = bySrc.get(src.serverId) ?? []
         list.push({ itemId, nativeId })

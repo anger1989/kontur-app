@@ -337,10 +337,12 @@ export interface Item {
   updatedAt: number
   unread: boolean
   mentioned: boolean
+  /** Локальный флаг письма (звезда). Синк сервера не перетирает. */
+  flagged?: boolean
   /** Для событий календаря: начало и конец, мс. Для остального null. */
   startsAt: number | null
   endsAt: number | null
-  /** Только для kind: 'mail' — 'inbox' | 'sent' | 'drafts'. Для остального не задаётся. */
+  /** Только для kind: 'mail' — 'inbox' | 'sent' | 'drafts' | 'trash'. Для остального не задаётся. */
   folder?: string | null
 }
 
@@ -368,7 +370,7 @@ export interface TodoUpdatePayload {
 }
 
 /** Канонические папки почты, которые приложение умеет синхронизировать и показывать. */
-export type MailFolder = 'inbox' | 'sent' | 'drafts'
+export type MailFolder = 'inbox' | 'sent' | 'drafts' | 'trash'
 
 /** Папка почтового ящика (live с сервера). role — канонический alias, если есть. */
 export interface MailMailbox {
@@ -431,6 +433,7 @@ export interface MailSendPayload {
   serviceId: string
   to: string
   cc?: string
+  bcc?: string
   subject: string
   body: string
   /** Id исходного письма при ответе — чтобы подставить In-Reply-To, если протокол умеет. */

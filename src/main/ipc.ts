@@ -25,6 +25,8 @@ import {
   getMail,
   sendMail,
   markMailRead,
+  markMailUnread,
+  setMailFlagged,
   listMailFolders,
   listMailFoldersForRules,
   createMailFolder,
@@ -272,11 +274,18 @@ export function registerIpc(getWin: () => BrowserWindow | null, views: () => Ser
     }
     // Кому написали сами — первые кандидаты в подсказках «Кому» (как в Outlook).
     const envId = getConfig().services.find((s) => s.id === payload.serviceId)?.envId
-    if (envId) rememberRecipients([payload.to, payload.cc].filter(Boolean).join(', '), envId)
+    if (envId)
+      rememberRecipients([payload.to, payload.cc, payload.bcc].filter(Boolean).join(', '), envId)
   })
   ipcMain.handle(CH.mailMarkRead, (_e, id: string) => {
     markMailRead(id)
     emitItemsChanged()
+  })
+  ipcMain.handle(CH.mailMarkUnread, (_e, id: string) => {
+    markMailUnread(id)
+  })
+  ipcMain.handle(CH.mailSetFlagged, (_e, id: string, flagged: boolean) => {
+    setMailFlagged(id, flagged)
   })
   ipcMain.handle(CH.mailListFolders, (_e, opts: { serviceId?: string; envId?: string } = {}) =>
     listMailFolders(opts)
