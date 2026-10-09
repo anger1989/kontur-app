@@ -130,6 +130,7 @@ export const CH = {
   openRoute: 'app:openRoute',
   joinMeeting: 'app:joinMeeting',
   /** Main → renderer: окно развёрнуто / полный экран (светофор скрыт). */
+  /** Payload: isFullScreen — светофор скрыт только тогда (не zoom/maximize). */
   windowMaximizedChanged: 'window:maximizedChanged',
   /** Main → renderer: ⌘` / ⌘⇧` из вебвью — листать окна стола. */
   deskCycleWindow: 'desk:cycleWindow',

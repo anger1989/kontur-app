@@ -62,8 +62,8 @@ export function TitleBar(): JSX.Element {
   const hasOpenWindows = useStore((s) => s.windows.some((w) => !w.minimized))
   const [now, setNow] = useState(() => new Date())
   const [layout, setLayout] = useState<{ short: string; name: string } | null>(null)
-  /** Развёрнуто / fullscreen — нативный светофор скрыт, кнопки уезжают влево. */
-  const [maximized, setMaximized] = useState(false)
+  /** Fullscreen — нативный светофор скрыт, кнопки уезжают влево. При zoom/maximize светофор остаётся. */
+  const [fullScreen, setFullScreen] = useState(false)
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 15_000)
@@ -76,7 +76,7 @@ export function TitleBar(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    return window.kontur.app.onMaximizedChange(setMaximized)
+    return window.kontur.app.onMaximizedChange(setFullScreen)
   }, [])
 
   const time = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
@@ -95,12 +95,12 @@ export function TitleBar(): JSX.Element {
 
   return (
     // Светофор нативный (trafficLightPosition x:14 y:14): ~66px справа от края.
-    // В maximize/fullscreen светофор пропадает — pl сжимаем, чтобы настройки
-    // и компоновка не висели в пустоте.
+    // В fullscreen он пропадает — pl сжимаем. Zoom/maximize (двойной клик
+    // по шапке) светофор оставляет — отступ не трогаем, иначе иконки залезают под него.
     <header
       className={cn(
         'drag flex h-10 shrink-0 items-center bg-sidebar/55 pr-4 shadow-[inset_0_-1px_0_rgb(255_255_255/0.1)] backdrop-blur-2xl transition-[padding] duration-200',
-        maximized ? 'pl-3' : 'pl-[80px]'
+        fullScreen ? 'pl-3' : 'pl-[80px]'
       )}
     >
       <div className="no-drag flex items-center gap-1">

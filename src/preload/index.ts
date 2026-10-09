@@ -468,9 +468,9 @@ const api = {
         ipcRenderer.off(CH.updateAvailable, h)
       }
     },
-    /** Окно развёрнуто / fullscreen — светофор скрыт, шапка сдвигает кнопки влево. */
-    onMaximizedChange: (cb: (maximized: boolean) => void) => {
-      const h = (_e: unknown, maximized: boolean): void => cb(maximized)
+    /** Fullscreen — светофор скрыт, шапка сдвигает кнопки влево (не zoom/maximize). */
+    onMaximizedChange: (cb: (fullScreen: boolean) => void) => {
+      const h = (_e: unknown, fullScreen: boolean): void => cb(fullScreen)
       ipcRenderer.on(CH.windowMaximizedChanged, h)
       return (): void => {
         ipcRenderer.off(CH.windowMaximizedChanged, h)

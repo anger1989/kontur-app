@@ -84,25 +84,17 @@ function createWindow(): void {
 
   win.on('ready-to-show', () => {
     win?.show()
-    // После show — актуальный maximize/fullscreen для отступа под светофор.
+    // Светофор скрывается только в fullscreen; при zoom/maximize остаётся.
     if (win && !win.isDestroyed()) {
-      win.webContents.send(
-        CH.windowMaximizedChanged,
-        win.isMaximized() || win.isFullScreen()
-      )
+      win.webContents.send(CH.windowMaximizedChanged, win.isFullScreen())
     }
   })
-  const emitMaximized = (): void => {
+  const emitFullScreen = (): void => {
     if (!win || win.isDestroyed()) return
-    win.webContents.send(
-      CH.windowMaximizedChanged,
-      win.isMaximized() || win.isFullScreen()
-    )
+    win.webContents.send(CH.windowMaximizedChanged, win.isFullScreen())
   }
-  win.on('maximize', emitMaximized)
-  win.on('unmaximize', emitMaximized)
-  win.on('enter-full-screen', emitMaximized)
-  win.on('leave-full-screen', emitMaximized)
+  win.on('enter-full-screen', emitFullScreen)
+  win.on('leave-full-screen', emitFullScreen)
   // Закрытие окна прячет приложение в трей, а не выгружает его: уведомления и
   // синхронизация продолжают работать в фоне. Полный выход — через трей или Cmd+Q.
   win.on('close', (e) => {

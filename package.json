@@ -1,6 +1,6 @@
 {
   "name": "kontur",
-  "version": "0.2.58",
+  "version": "0.2.59",
   "description": "Единое рабочее место для двух изолированных контуров",
   "main": "./out/main/index.js",
   "author": "",
