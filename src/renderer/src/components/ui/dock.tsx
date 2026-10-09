@@ -6,10 +6,13 @@ import {
   useSpring,
   useTransform
 } from 'motion/react'
-import { GlowingEffect } from '@/components/ui/glowing-effect'
 import { cn } from '@/lib/utils'
 
-/** Стеклянный dock с magnification и локальным amber-glow на плитках. */
+/**
+ * Док: плотное стекло-таблетка + magnification.
+ * Плитки непрозрачные — иначе при подъёме на hover полупрозрачные
+ * квадраты «вылезают» на обои и выглядят грязно.
+ */
 
 export interface DockItem {
   title: string
@@ -72,8 +75,10 @@ export function Dock({
       onMouseLeave={() => mouseX.set(Number.POSITIVE_INFINITY)}
       style={{ gap, paddingLeft: pad, paddingRight: pad }}
       className={cn(
-        'mx-auto flex h-[4.75rem] items-end overflow-visible rounded-2xl border border-border bg-card/82 px-1 pb-3',
-        'shadow-[inset_0_1px_rgb(255_255_255/0.1),0_1px_2px_rgb(0_0_0/0.16),0_16px_40px_-20px_rgb(0_0_0/0.65)] backdrop-blur-2xl',
+        // items-end + pb: волна растёт вверх. overflow-visible — тултипы / magnification.
+        'mx-auto flex h-[4.75rem] items-end overflow-visible rounded-3xl border-2 px-1 pb-3 shadow-2xl',
+        'border-white/25 bg-neutral-200/80 backdrop-blur-lg ring-1 ring-black/10',
+        'dark:border-white/15 dark:bg-neutral-900/80 dark:ring-white/10',
         className
       )}
       initial={{ y: 24, opacity: 0 }}
@@ -84,7 +89,7 @@ export function Dock({
         <div key={item.title} className="relative flex items-end" style={{ gap }}>
           {item.separatorBefore && i > 0 && (
             <span
-              className="mb-2 w-px shrink-0 self-end bg-border"
+              className="mb-2 w-px shrink-0 self-end bg-black/15 dark:bg-white/15"
               style={{ height: tile * 0.55 }}
             />
           )}
@@ -141,27 +146,16 @@ function DockIcon({
     >
       <motion.div
         className={cn(
-          'relative flex size-full items-center justify-center rounded-xl border border-border bg-secondary/75 shadow-xs',
-          'transition-colors hover:bg-accent',
-          isFocused && 'border-foreground/20 bg-accent ring-1 ring-ring/50'
+          'relative flex size-full items-center justify-center rounded-2xl shadow-lg ring-1',
+          'bg-gradient-to-b from-white/90 to-white/55 ring-black/10',
+          'dark:from-neutral-800 dark:to-neutral-900 dark:ring-white/10',
+          isFocused && 'ring-2 ring-primary/70'
         )}
         animate={{
           y: pressed ? 2 : hovered || isFocused ? -8 : 0
         }}
         transition={{ type: 'spring', stiffness: 400, damping: 17 }}
       >
-        <GlowingEffect
-          className="z-10"
-          disabled={false}
-          glow
-          variant="amber"
-          proximity={72}
-          spread={42}
-          borderWidth={2}
-          inactiveZone={0.01}
-          movementDuration={0.35}
-        />
-
         <motion.div
           className="relative z-[1] flex items-center justify-center text-neutral-800 dark:text-white"
           style={{ width: iconW, height: iconH }}
@@ -171,7 +165,11 @@ function DockIcon({
           {icon}
         </motion.div>
 
-        <span className="pointer-events-none absolute inset-x-1 top-px h-px bg-foreground/5" />
+        <motion.div
+          className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-white/25 to-transparent"
+          animate={{ opacity: hovered ? 0.35 : 0.12 }}
+          transition={{ duration: 0.2 }}
+        />
       </motion.div>
 
       {/* Tooltip сверху */}
@@ -183,7 +181,7 @@ function DockIcon({
           scale: hovered ? 1 : 0.85
         }}
         transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-        className="pointer-events-none absolute -top-10 left-1/2 z-[60] -translate-x-1/2 rounded-md border border-border bg-popover px-2 py-1 text-xs whitespace-nowrap text-popover-foreground shadow-md"
+        className="pointer-events-none absolute -top-10 left-1/2 z-[60] -translate-x-1/2 rounded-md bg-neutral-900/90 px-2 py-1 text-xs whitespace-nowrap text-white backdrop-blur-sm"
       >
         {title}
       </motion.div>
@@ -192,7 +190,7 @@ function DockIcon({
       <motion.div
         className={cn(
           'absolute -bottom-1 left-1/2 size-1 -translate-x-1/2 rounded-full',
-          isOpen ? 'bg-foreground/70' : 'bg-transparent'
+          isOpen ? 'bg-primary' : 'bg-transparent'
         )}
         animate={{
           scale: pressed ? 1.5 : 1,
