@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -28,7 +29,6 @@ import { TodosWidget } from './TodosWidget'
 import { AssistantWidget } from './AssistantWidget'
 import { AutomationsWidget } from './AutomationsWidget'
 import { GlowingEffect } from '@/components/ui/glowing-effect'
-import { AnimatedList } from '@/components/ui/animated-list'
 import { WidgetHeader } from '@/components/ui/stats-card'
 import { DOCK_CLEARANCE } from '@/lib/deskLayout'
 import { toast } from '@/components/ui/toast'
@@ -196,6 +196,60 @@ function attentionKind(it: Item): AttentionKind | null {
   return null
 }
 
+const AttentionListItem = memo(function AttentionListItem({
+  item,
+  kind,
+  accent,
+  serviceName,
+  onOpen
+}: {
+  item: Item
+  kind: AttentionKind
+  accent?: string
+  serviceName?: string
+  onOpen: (item: Item) => void
+}): JSX.Element {
+  const Icon = KIND_ICON[item.kind] ?? FileText
+  const tint = KIND_COLOR[item.kind] ?? '#64748b'
+
+  return (
+    <button
+      type="button"
+      data-attention-kind={kind}
+      onClick={() => onOpen(item)}
+      className={cn(
+        'attention-list-item relative flex w-full max-w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left',
+        'transition-colors duration-200 ease-out',
+        'bg-foreground/[0.03] hover:bg-foreground/[0.06]',
+        'dark:bg-white/[0.04] dark:hover:bg-white/[0.07]',
+        'dark:[box-shadow:0_-12px_40px_-16px_#ffffff14_inset] dark:backdrop-blur-md',
+        'border border-transparent dark:border-white/10'
+      )}
+    >
+      <span
+        className="flex size-8 shrink-0 items-center justify-center rounded-xl text-white"
+        style={{ backgroundColor: tint }}
+      >
+        <Icon className="size-3.5" strokeWidth={2.25} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-1.5">
+          <span className="min-w-0 truncate text-[13px] font-medium">{item.title}</span>
+          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+            {shortTime(item.updatedAt)}
+          </span>
+        </span>
+        <span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+          <span className="size-1.5 shrink-0 rounded-full" style={{ background: accent }} />
+          <span className="truncate">{serviceName ?? item.serviceId}</span>
+        </span>
+      </span>
+    </button>
+  )
+})
+
+AttentionListItem.displayName = 'AttentionListItem'
+
 /** Требует внимания: непрочитанные письма/упоминания и задачи, с фильтром по виду и прокруткой. */
 function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: number } = {}): JSX.Element {
   const { config, openItem } = useStore()
@@ -237,7 +291,14 @@ function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: nu
     return c
   }, [all])
 
-  const shown = filter ? all.filter((x) => x.kind === filter) : all
+  const envAccentById = useMemo(
+    () => new Map(config?.envs.map((env) => [env.id, env.accent]) ?? []),
+    [config?.envs]
+  )
+  const serviceNameById = useMemo(
+    () => new Map(config?.services.map((service) => [service.id, service.name]) ?? []),
+    [config?.services]
+  )
 
   const Wrap = bare ? 'div' : Glass
   return (
@@ -281,53 +342,23 @@ function AttentionWidget({ bare, listHeight }: { bare?: boolean; listHeight?: nu
               ))}
           </div>
 
-          {/* AnimatedList: spring при появлении/уходе; только вертикальный скролл. */}
-          <div className="overflow-x-hidden overflow-y-auto pr-0.5" style={{ maxHeight: listHeight ?? 288 }}>
-            <AnimatedList className="min-w-0 gap-1.5">
-              {shown.map(({ it }) => {
-                const Icon = KIND_ICON[it.kind] ?? FileText
-                const accent = config?.envs.find((e) => e.id === it.envId)?.accent
-                const serviceName = config?.services.find((s) => s.id === it.serviceId)?.name
-                const tint = KIND_COLOR[it.kind] ?? '#64748b'
-                return (
-                  <button
-                    key={it.id}
-                    type="button"
-                    onClick={() => openItem(it)}
-                    className={cn(
-                      'relative flex w-full max-w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left',
-                      'transition-colors duration-200 ease-out',
-                      'bg-foreground/[0.03] hover:bg-foreground/[0.06]',
-                      'dark:bg-white/[0.04] dark:hover:bg-white/[0.07]',
-                      'dark:[box-shadow:0_-12px_40px_-16px_#ffffff14_inset] dark:backdrop-blur-md',
-                      'border border-transparent dark:border-white/10'
-                    )}
-                  >
-                    <span
-                      className="flex size-8 shrink-0 items-center justify-center rounded-xl text-white"
-                      style={{ backgroundColor: tint }}
-                    >
-                      <Icon className="size-3.5" strokeWidth={2.25} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-baseline gap-1.5">
-                        <span className="min-w-0 truncate text-[13px] font-medium">{it.title}</span>
-                        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-                          {shortTime(it.updatedAt)}
-                        </span>
-                      </span>
-                      <span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-                        <span
-                          className="size-1.5 shrink-0 rounded-full"
-                          style={{ background: accent }}
-                        />
-                        <span className="truncate">{serviceName ?? it.serviceId}</span>
-                      </span>
-                    </span>
-                  </button>
-                )
-              })}
-            </AnimatedList>
+          {/* Все строки остаются смонтированными: фильтр меняет один data-атрибут,
+              поэтому повторное переключение не пересоздаёт сотни DOM-узлов. */}
+          <div
+            data-attention-filter={filter ?? 'all'}
+            className="attention-list flex min-w-0 flex-col gap-1.5 overflow-x-hidden overflow-y-auto pr-0.5"
+            style={{ maxHeight: listHeight ?? 288 }}
+          >
+            {all.map(({ it, kind }) => (
+              <AttentionListItem
+                key={it.id}
+                item={it}
+                kind={kind}
+                accent={envAccentById.get(it.envId)}
+                serviceName={serviceNameById.get(it.serviceId)}
+                onOpen={openItem}
+              />
+            ))}
           </div>
         </>
       )}
