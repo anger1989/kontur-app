@@ -199,6 +199,21 @@ export class MattermostClient {
     })
   }
 
+  /** Полная замена текста поста (автор должен быть текущий пользователь). */
+  updatePost(postId: string, message: string): Promise<MmPost> {
+    return this.call<MmPost>(`/posts/${postId}`, {
+      method: 'PUT',
+      body: { id: postId, message }
+    })
+  }
+
+  addReaction(userId: string, postId: string, emojiName: string): Promise<unknown> {
+    return this.call('/reactions', {
+      method: 'POST',
+      body: { user_id: userId, post_id: postId, emoji_name: emojiName }
+    })
+  }
+
   /** Ссылка на пост в вебе: по ней открывается нужный тред. */
   permalink(teamName: string, postId: string): string {
     return `${this.baseUrl.replace(/\/+$/, '')}/${teamName}/pl/${postId}`

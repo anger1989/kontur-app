@@ -70,7 +70,10 @@ export function TitleBar(): JSX.Element {
     return window.kontur.keyboard.onLayoutChange((l) => setLayout({ short: l.short, name: l.name }))
   }, [])
 
+  // Заставка держит шапку ~5 секунд, и ранний сигнал из main к этому моменту
+  // уже ушёл — поэтому состояние спрашиваем сами, а не только слушаем.
   useEffect(() => {
+    void window.kontur.app.isFullScreen().then(setFullScreen)
     return window.kontur.app.onMaximizedChange(setFullScreen)
   }, [])
 

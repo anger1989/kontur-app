@@ -66,6 +66,10 @@ export function Desktop(): JSX.Element {
         return
       }
       if (isPopoverOpen()) return
+      // Счётчик isPopoverOpen успевает обнулиться в микротаске раньше, чем Esc
+      // дойдёт до window: Radix закрывает поповер своим слушателем на document.
+      // Пока контент ещё в DOM (анимация ухода) — этот Esc был адресован ему.
+      if (document.querySelector('[data-slot="popover-content"]')) return
       if (document.querySelector('[data-slot="dialog-content"]')) return
       if (st.arranged) {
         peekDesktop(size)

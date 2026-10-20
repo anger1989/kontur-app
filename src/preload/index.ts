@@ -12,6 +12,7 @@ import type {
   MailMailbox,
   MailRule,
   MailRuleUpsert,
+  MailOutgoingAttachment,
   MailSendPayload,
   CalendarCreatePayload,
   CalendarUpdatePayload,
@@ -225,6 +226,14 @@ const api = {
   mail: {
     get: (id: string) => invoke<MailDetail>(CH.mailGet, id),
     send: (payload: MailSendPayload) => invoke<void>(CH.mailSend, payload),
+    /** Скачать вложение и открыть системным приложением. */
+    openAttachment: (itemId: string, attachment: { id: string; name: string }) =>
+      invoke<void>(CH.mailAttachmentOpen, itemId, attachment),
+    /** Скачать вложение и сохранить через диалог. Вернёт путь или null. */
+    saveAttachment: (itemId: string, attachment: { id: string; name: string }) =>
+      invoke<string | null>(CH.mailAttachmentSave, itemId, attachment),
+    /** Диалог выбора файлов для письма. */
+    pickAttachments: () => invoke<MailOutgoingAttachment[]>(CH.mailPickAttachments),
     markRead: (id: string) => invoke<void>(CH.mailMarkRead, id),
     markUnread: (id: string) => invoke<void>(CH.mailMarkUnread, id),
     setFlagged: (id: string, flagged: boolean) => invoke<void>(CH.mailSetFlagged, id, flagged),
@@ -421,7 +430,16 @@ const api = {
       invoke<{ id: string; name: string; detected: boolean; configured: boolean; configPath: string }[]>(
         CH.mcpAgents
       ),
-    connect: (id: string) => invoke<{ ok: boolean; message: string }>(CH.mcpConnect, id)
+    connect: (id: string) => invoke<{ ok: boolean; message: string }>(CH.mcpConnect, id),
+    /** Скиллы Kontur: что есть в сборке и разложены ли они по агентам. */
+    skills: () =>
+      invoke<{
+        skills: { id: string; name: string; description: string }[]
+        installed: { claude: boolean; cursor: boolean }
+        claudeDir: string
+        cursorDir: string
+      }>(CH.mcpSkills),
+    installSkills: () => invoke<{ ok: boolean; message: string }>(CH.mcpInstallSkills)
   },
   app: {
     pickFile: (filters?: { name: string; extensions: string[] }[]) =>
@@ -468,6 +486,10 @@ const api = {
         ipcRenderer.off(CH.updateAvailable, h)
       }
     },
+    /** Текущий fullscreen: событие могло уйти до того, как шапка смонтировалась. */
+    isFullScreen: () => invoke<boolean>(CH.windowIsFullScreen),
+    /** Закрыть окно — Kontur завершает работу. */
+    closeWindow: () => invoke<void>(CH.windowClose),
     /** Fullscreen — светофор скрыт, шапка сдвигает кнопки влево (не zoom/maximize). */
     onMaximizedChange: (cb: (fullScreen: boolean) => void) => {
       const h = (_e: unknown, fullScreen: boolean): void => cb(fullScreen)

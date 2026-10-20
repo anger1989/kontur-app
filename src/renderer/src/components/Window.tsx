@@ -14,7 +14,8 @@ import {
 import { toast } from '@/components/ui/toast'
 import { nativeViewId, showServiceView, useStore, windowTitle, type DeskWindow } from '@/store'
 import { Button } from '@/components/ui/button'
-import { clampServiceRect, isOccludedByHigher, maximizedRect } from '@/lib/deskLayout'
+import { clampServiceRect, isOccludedByHigher } from '@/lib/deskLayout'
+import { KDE_WINDOW_CORNER_RADIUS, WINDOW_CORNER_RADIUS } from '@/lib/viewHost'
 import { ServiceIcon } from './ServiceIcon'
 import { ServiceHost } from './ServiceHost'
 import { cn } from '@/lib/utils'
@@ -54,6 +55,85 @@ function trackDrag(onMove: (dx: number, dy: number) => void, onEnd?: () => void)
 
 function tickViewBounds(): void {
   window.dispatchEvent(new Event('kontur:view-bounds-tick'))
+}
+
+/**
+ * Кнопки окна. В macOS-оболочке они слева (как светофор), в KDE — справа и в
+ * порядке Breeze: свернуть, развернуть, закрыть; крестик краснеет под курсором.
+ */
+function WindowControls({
+  kde,
+  maximized,
+  onClose,
+  onMinimize,
+  onMaximize
+}: {
+  kde: boolean
+  maximized: boolean
+  onClose: () => void
+  onMinimize: () => void
+  onMaximize: () => void
+}): JSX.Element {
+  const stop = (e: ReactPointerEvent): void => e.stopPropagation()
+
+  const close = (
+    <Button
+      key="close"
+      type="button"
+      size="icon-xs"
+      variant="ghost"
+      title="Закрыть"
+      aria-label="Закрыть"
+      onPointerDown={stop}
+      onClick={onClose}
+      className={cn(
+        'text-muted-foreground',
+        kde
+          ? 'rounded-[3px] hover:bg-destructive hover:text-white'
+          : 'hover:bg-destructive/10 hover:text-destructive-foreground'
+      )}
+    >
+      <X className="size-3" />
+    </Button>
+  )
+  const minimize = (
+    <Button
+      key="minimize"
+      type="button"
+      size="icon-xs"
+      variant="ghost"
+      title="Свернуть"
+      aria-label="Свернуть"
+      onPointerDown={stop}
+      onClick={onMinimize}
+      className={cn('text-muted-foreground', kde && 'rounded-[3px]')}
+    >
+      <Minus className="size-3" />
+    </Button>
+  )
+  const maximize = (
+    <Button
+      key="maximize"
+      type="button"
+      size="icon-xs"
+      variant="ghost"
+      title={maximized ? 'Восстановить' : 'Развернуть'}
+      aria-label={maximized ? 'Восстановить' : 'Развернуть'}
+      onPointerDown={stop}
+      onClick={onMaximize}
+      className={cn('text-muted-foreground', kde && 'rounded-[3px]')}
+    >
+      <Maximize2 className="size-3" />
+    </Button>
+  )
+
+  // order-last: в DOM группа остаётся на месте (кнопки сервиса рядом), но в
+  // KDE уезжает в правый край шапки.
+  return (
+    <div className={cn('flex items-center gap-0.5', kde && 'order-last ml-auto pl-2')}>
+      {kde ? [minimize, maximize, close] : [close, minimize, maximize]}
+    </div>
+  )
 }
 
 function PageContent({ win }: { win: DeskWindow }): JSX.Element | null {
@@ -130,6 +210,7 @@ export function Window({
     const w = s.windows.find((x) => x.id === winId)
     return w ? nativeViewId(w.route, s.browser) : null
   })
+  const kde = useStore((s) => s.config?.shell === 'kde')
   const closeWindow = useStore((s) => s.closeWindow)
   const focusWindow = useStore((s) => s.focusWindow)
   const minimizeWindow = useStore((s) => s.minimizeWindow)
@@ -187,7 +268,6 @@ export function Window({
   // Хост держим смонтированным и при перекрытии: иначе unmount → hide → пустое
   // окно и мигание при возврате фокуса. Нативный view прячется, сверху freeze.
   const showServiceHost = isService && serviceReady && !genieOut
-  const maximizeSize = maximizedRect(desktopSize)
 
   const dockX = Math.round(desktopSize.width / 2 - 24)
   const dockY = Math.round(desktopSize.height - 52)
@@ -260,7 +340,10 @@ export function Window({
       void window.kontur.view.hide(viewId)
       setServiceReady(false)
     }
-    toggleMaximize(win.id, maximizeSize)
+    // Именно размер стола: maximizedRect внутри store сам вычтет полосу
+    // панели KDE. Передать сюда уже посчитанный прямоугольник значило бы
+    // вычесть её дважды — окно повисало бы над панелью.
+    toggleMaximize(win.id, desktopSize)
   }
 
   const runMinimize = (): void => {
@@ -277,8 +360,7 @@ export function Window({
       className={cn(
         // Тень на внешней оболочке без overflow-hidden — иначе box-shadow клипится.
         'absolute',
-        !win.maximized &&
-          'shadow-[0_1px_2px_rgba(0,0,0,0.18),0_18px_48px_-18px_rgba(0,0,0,0.55)]',
+        !win.maximized && (isTop ? 'desk-window-shadow-active' : 'desk-window-shadow'),
         genieOut && 'pointer-events-none'
       )}
       style={{ zIndex }}
@@ -323,7 +405,7 @@ export function Window({
               height: win.height,
               opacity: 1,
               scale: 1,
-              borderRadius: win.maximized ? 0 : 12
+              borderRadius: win.maximized ? 0 : kde ? KDE_WINDOW_CORNER_RADIUS : WINDOW_CORNER_RADIUS
             }
       }
       transition={snap ? SNAP : SPRING}
@@ -349,13 +431,16 @@ export function Window({
       <div
         className={cn(
           'relative flex h-full w-full flex-col overflow-hidden border border-border bg-card text-card-foreground',
-          isTop && 'ring-1 ring-ring/40'
+          // Активное окно: тонкое кольцо. В Breeze оно синее, как в Plasma.
+          isTop && (kde ? 'ring-1 ring-[var(--kde-accent)]/70' : 'ring-1 ring-ring/40')
         )}
         style={{ borderRadius: 'inherit' }}
       >
       <div
         className={cn(
-          'no-drag relative flex h-9 w-full shrink-0 items-center gap-2 border-b border-border bg-secondary/60 px-2',
+          'no-drag relative flex h-9 w-full shrink-0 items-center gap-2 border-b border-border px-2',
+          // Breeze: плоская полоса цвета панели, у неактивного окна она блёклая.
+          kde ? (isTop ? 'kde-surface' : 'kde-surface opacity-80') : 'bg-secondary/60',
           peekMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
         )}
         onPointerDown={onTitlePointerDown}
@@ -363,44 +448,13 @@ export function Window({
           if (!peekMode) runMaximize()
         }}
       >
-        <div className="flex items-center gap-0.5">
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            title="Закрыть"
-            aria-label="Закрыть"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => closeWindow(win.id)}
-            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive-foreground"
-          >
-            <X className="size-3" />
-          </Button>
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            title="Свернуть"
-            aria-label="Свернуть"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={runMinimize}
-            className="text-muted-foreground"
-          >
-            <Minus className="size-3" />
-          </Button>
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            title={win.maximized ? 'Восстановить' : 'Развернуть'}
-            aria-label={win.maximized ? 'Восстановить' : 'Развернуть'}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={runMaximize}
-            className="text-muted-foreground"
-          >
-            <Maximize2 className="size-3" />
-          </Button>
-        </div>
+        <WindowControls
+          kde={kde}
+          maximized={win.maximized}
+          onClose={() => closeWindow(win.id)}
+          onMinimize={runMinimize}
+          onMaximize={runMaximize}
+        />
 
         {isService && (
           <div

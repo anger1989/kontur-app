@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import { Globe, Loader2 } from 'lucide-react'
 import { showServiceView, useStore } from '@/store'
 import { Button } from '@/components/ui/button'
-import { RESIZE_INSET, useViewBounds, WINDOW_CORNER_RADIUS } from '@/lib/viewHost'
+import { RESIZE_INSET, useViewBounds, useWindowCornerRadius } from '@/lib/viewHost'
 import { ServiceIcon } from './ServiceIcon'
 import { cn } from '@/lib/utils'
 
@@ -32,6 +32,7 @@ export function ServiceHost({
   const service = useStore((s) => s.config?.services.find((x) => x.id === serviceId))
   const openWindow = useStore((s) => s.openWindow)
   const maximized = layout?.maximized ?? false
+  const cornerRadius = useWindowCornerRadius()
   const [snap, setSnap] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -79,7 +80,7 @@ export function ServiceHost({
 
   useViewBounds(ref, serviceId, {
     inset: maximized ? 0 : RESIZE_INSET,
-    borderRadius: maximized ? 0 : WINDOW_CORNER_RADIUS,
+    borderRadius: maximized ? 0 : cornerRadius,
     rect: `${layout?.x},${layout?.y},${layout?.width},${layout?.height}`
   })
 

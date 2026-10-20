@@ -285,6 +285,8 @@ export function defaultConfig(): AppConfig {
   return {
     version: CONFIG_VERSION,
     theme: 'system',
+    shell: 'macos',
+    kdePinned: [],
     wallpaper: { kind: 'image', value: '1' },
     vaultPath: null,
     unifyMail: true,

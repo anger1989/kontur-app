@@ -9,7 +9,8 @@ import { z } from 'zod'
 import { logInfo, logError, logWarn } from '../log'
 import * as actions from './actions'
 import * as automations from '../automations'
-import type { AutomationUpsert } from '@shared/automations'
+import type { AutomationEventType, AutomationUpsert } from '@shared/automations'
+import { isAutomationEventType } from '@shared/automations'
 
 /**
  * MCP-сервер Kontur.
@@ -393,6 +394,15 @@ function build(): McpServer {
     }
   )
 
+  /* ── GitLab ──────────────────────────────────────────────────────
+     Merge request адресуется парой projectId/mrIid — числовой id проекта
+     и номер из ссылки `…/-/merge_requests/42`. */
+
+  const mrArgs = {
+    projectId: z.number().describe('Числовой id проекта'),
+    mrIid: z.number().describe('Номер merge request’а внутри проекта (iid)')
+  }
+
   server.tool(
     'gitlab_list_reviews',
     'Merge request’ы, ждущие моего ревью.',
@@ -407,9 +417,70 @@ function build(): McpServer {
   )
 
   server.tool(
+    'gitlab_list_mrs',
+    'Merge request’ы конкретного проекта GitLab.',
+    {
+      projectId: mrArgs.projectId,
+      state: z
+        .enum(['opened', 'closed', 'merged', 'all'])
+        .optional()
+        .describe('Состояние, по умолчанию opened'),
+      author: z.string().optional().describe('Логин автора'),
+      search: z.string().optional().describe('Подстрока в заголовке или описании'),
+      env: envArg
+    },
+    async ({ projectId, state, author, search, env }) => {
+      try {
+        return ok(await actions.gitlabListMrs(projectId, state ?? 'opened', author, search, env))
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
+  server.tool(
+    'gitlab_get_mr',
+    'Карточка merge request’а: описание, ветки, ревьюеры, статус пайплайна.',
+    { ...mrArgs, env: envArg },
+    async ({ projectId, mrIid, env }) => {
+      try {
+        return ok(await actions.gitlabGetMr(projectId, mrIid, env))
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
+  server.tool(
+    'gitlab_mr_diff',
+    'Diff merge request’а в unified-формате (длинный ответ подрезается).',
+    { ...mrArgs, env: envArg },
+    async ({ projectId, mrIid, env }) => {
+      try {
+        return ok(await actions.gitlabMrDiff(projectId, mrIid, env))
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
+  server.tool(
+    'gitlab_mr_discussions',
+    'Обсуждения merge request’а: треды к строкам, комментарии, системные записи.',
+    { ...mrArgs, env: envArg },
+    async ({ projectId, mrIid, env }) => {
+      try {
+        return ok(await actions.gitlabMrDiscussions(projectId, mrIid, env))
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
+  server.tool(
     'gitlab_comment_mr',
     'Оставить комментарий к merge request.',
-    { projectId: z.number(), mrIid: z.number(), body: z.string(), env: envArg },
+    { ...mrArgs, body: z.string(), env: envArg },
     async ({ projectId, mrIid, body, env }) => {
       try {
         return ok(await actions.gitlabCommentMr(projectId, mrIid, body, env))
@@ -422,10 +493,40 @@ function build(): McpServer {
   server.tool(
     'gitlab_approve_mr',
     'Одобрить merge request.',
-    { projectId: z.number(), mrIid: z.number(), env: envArg },
+    { ...mrArgs, env: envArg },
     async ({ projectId, mrIid, env }) => {
       try {
         return ok(await actions.gitlabApproveMr(projectId, mrIid, env))
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
+  server.tool(
+    'gitlab_find_project',
+    'Найти проект (сервис) GitLab по имени или пути — отсюда берётся projectId для остальных инструментов.',
+    { query: z.string().describe('Имя или часть пути, например sales-channel'), env: envArg },
+    async ({ query, env }) => {
+      try {
+        return ok(await actions.gitlabFindProject(query, env))
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
+  server.tool(
+    'gitlab_search_code',
+    'Поиск по коду в GitLab. Без projectId нужен Advanced Search — надёжнее сузить до проекта.',
+    {
+      query: z.string().describe('Поисковый запрос'),
+      projectId: z.number().optional().describe('Ограничить поиск одним проектом'),
+      env: envArg
+    },
+    async ({ query, projectId, env }) => {
+      try {
+        return ok(await actions.gitlabSearchCode(query, projectId, env))
       } catch (e) {
         return fail(e)
       }
@@ -883,7 +984,7 @@ function build(): McpServer {
   // Агент описывает сценарий целиком через automations_upsert; раннер крутит сам.
   server.tool(
     'automations_list_step_types',
-    'Каталог типов шагов для сценариев Kontur (notes.read, duty.resolve, mattermost.set_banner, …).',
+    'Каталог типов шагов для сценариев Kontur (notes.read, mattermost.post, notify, todos.create, …).',
     {},
     async () => {
       try {
@@ -895,8 +996,21 @@ function build(): McpServer {
   )
 
   server.tool(
+    'automations_list_event_types',
+    'Каталог событий для trigger.type=event: mail.received, message.received, review.new, task.new, calendar.soon.',
+    {},
+    async () => {
+      try {
+        return ok(automations.listEventTypes())
+      } catch (e) {
+        return fail(e)
+      }
+    }
+  )
+
+  server.tool(
     'automations_list',
-    'Список локальных автоматизаций Kontur (cron-сценарии) и статус последнего запуска.',
+    'Список локальных автоматизаций Kontur (cron и event) и статус последнего запуска.',
     {},
     async () => {
       try {
@@ -923,16 +1037,39 @@ function build(): McpServer {
 
   server.tool(
     'automations_upsert',
-    'Создать или полностью заменить сценарий: имя, cron, шаги. ' +
-      'Сначала смотри automations_list_step_types. Строки в params поддерживают {{vars}} из контекста шагов.',
+    'Создать или заменить сценарий. Задай либо cron (по расписанию), либо event (по событию) — ровно одно. ' +
+      'События: automations_list_event_types. Шаги: automations_list_step_types. ' +
+      'cron+filter — раз в cron смотрит непрочитанную почту, гоняет шаги и помечает прочитанным. ' +
+      'В params строк — {{title}}, {{author}}, {{url}}, {{body}}, {{item.*}}.',
     {
       id: z.string().optional().describe('id при обновлении существующей'),
       name: z.string().describe('Короткое имя для виджета'),
       enabled: z.boolean().optional().describe('По умолчанию true'),
       cron: z
         .string()
-        .describe('5-полевой cron, напр. «0 9 * * 1» — понедельник 09:00'),
-      tz: z.string().optional().describe('IANA TZ, по умолчанию Europe/Moscow'),
+        .optional()
+        .describe('5-полевой cron, напр. «0 9 * * 1». Взаимоисключает с event.'),
+      tz: z.string().optional().describe('IANA TZ для cron, по умолчанию Europe/Moscow'),
+      event: z
+        .string()
+        .optional()
+        .describe(
+          'Событие: mail.received | message.received | review.new | task.new | calendar.soon. Взаимоисключает с cron.'
+        ),
+      filter: z
+        .object({
+          envId: z.string().optional(),
+          authorContains: z.string().optional(),
+          titleContains: z.string().optional(),
+          bodyContains: z.string().optional(),
+          mentioned: z.boolean().optional(),
+          folder: z.string().optional(),
+          minutesBefore: z.number().optional().describe('Для calendar.soon, минуты до начала')
+        })
+        .optional()
+        .describe(
+          'Фильтр: для event — матч элемента; для cron — опрос непрочитанной почты по фильтру'
+        ),
       steps: z
         .array(
           z.object({
@@ -943,15 +1080,24 @@ function build(): McpServer {
         .min(1)
         .describe('Упорядоченные шаги')
     },
-    async ({ id, name, enabled, cron, tz, steps }) => {
+    async ({ id, name, enabled, cron, tz, event, filter, steps }) => {
       try {
-        const payload: AutomationUpsert = {
-          id,
-          name,
-          enabled,
-          schedule: { cron, tz },
-          steps
+        const hasCron = Boolean(cron?.trim())
+        const hasEvent = Boolean(event?.trim())
+        if (hasCron === hasEvent) {
+          throw new Error('Укажи ровно одно: cron или event')
         }
+        let trigger: AutomationUpsert['trigger']
+        if (hasCron) {
+          trigger = { type: 'cron', cron: cron!.trim(), tz, filter }
+        } else {
+          const ev = event!.trim()
+          if (!isAutomationEventType(ev)) {
+            throw new Error(`Неизвестное событие: ${ev}`)
+          }
+          trigger = { type: 'event', event: ev as AutomationEventType, filter }
+        }
+        const payload: AutomationUpsert = { id, name, enabled, trigger, steps }
         return ok(automations.automationsUpsert(payload))
       } catch (e) {
         return fail(e)
@@ -992,7 +1138,7 @@ function build(): McpServer {
 
   server.tool(
     'automations_run_now',
-    'Прогнать сценарий сразу, не дожидаясь cron. Удобно для проверки после upsert.',
+    'Прогнать сценарий сразу. cron+filter — poll непрочитанных; event — на последнем подходящем элементе.',
     { automation: z.string().describe('id или имя') },
     async ({ automation }) => {
       try {

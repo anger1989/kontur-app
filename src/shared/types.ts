@@ -220,6 +220,12 @@ export interface BrowserConfig {
 export type ThemePref = 'system' | 'light' | 'dark'
 
 /**
+ * Облик рабочего места: `macos` — строка меню сверху и док снизу,
+ * `kde` — одна нижняя панель Plasma с «Пуском», списком окон и треем.
+ */
+export type ShellVariant = 'macos' | 'kde'
+
+/**
  * Обои рабочего стола: заливка, встроенный градиент, картинка или живой фон.
  * Для image: ключ встроенного пресета (`1`…`9`) или data URL своей картинки.
  * Для animated: ключ живого фона (`aurora`), сам фон рисует компонент.
@@ -288,6 +294,13 @@ export interface WidgetLayout {
 export interface AppConfig {
   version: number
   theme: ThemePref
+  /** Какой оболочкой рисуем рабочий стол: macOS-подобной или KDE Plasma. */
+  shell: ShellVariant
+  /**
+   * Закреплённые на панели KDE пункты — ключи маршрутов (`page:notes`,
+   * `service:bank.jira`) в том порядке, в котором они стоят на панели.
+   */
+  kdePinned: string[]
   wallpaper: Wallpaper
   /** Путь к папке с заметками. По умолчанию ~/Documents/Kontur Vault. */
   vaultPath: string | null
@@ -415,6 +428,19 @@ export interface MailRuleUpsert {
 }
 
 /** Полное письмо для чтения в клиенте. */
+/** Вложение полученного письма. Содержимое качается отдельно, по `id`. */
+export interface MailAttachment {
+  /** Ссылка протокола: FileReference (EAS), AttachmentId (EWS), часть (IMAP/JMAP). */
+  id: string
+  name: string
+  /** Размер в байтах, если сервер его сообщил. */
+  size: number | null
+  mime: string
+  /** Картинка из тела письма (cid:) — в списке файлов её не показываем. */
+  inline: boolean
+  contentId: string | null
+}
+
 export interface MailDetail {
   id: string
   serviceId: string
@@ -426,6 +452,17 @@ export interface MailDetail {
   bodyText: string
   bodyHtml: string | null
   unread: boolean
+  attachments: MailAttachment[]
+}
+
+/** Файл, уходящий вместе с письмом. */
+export interface MailOutgoingAttachment {
+  name: string
+  mime: string
+  /** Содержимое в base64 (без префикса data:). */
+  data: string
+  /** Вставлено в тело (Ctrl+V) — уйдёт картинкой внутри письма, а не файлом. */
+  inline?: boolean
 }
 
 /** Исходящее письмо (новое или ответ). */
@@ -438,6 +475,7 @@ export interface MailSendPayload {
   body: string
   /** Id исходного письма при ответе — чтобы подставить In-Reply-To, если протокол умеет. */
   replyToId?: string
+  attachments?: MailOutgoingAttachment[]
 }
 
 export type MeetingResponseKind = 'accept' | 'tentative' | 'decline'

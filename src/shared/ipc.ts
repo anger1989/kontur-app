@@ -80,6 +80,12 @@ export const CH = {
   mailMarkRead: 'mail:markRead',
   mailMarkUnread: 'mail:markUnread',
   mailSetFlagged: 'mail:setFlagged',
+  /** Скачать вложение и открыть его системным приложением. */
+  mailAttachmentOpen: 'mail:attachmentOpen',
+  /** Скачать вложение и сохранить через диалог «Сохранить как». */
+  mailAttachmentSave: 'mail:attachmentSave',
+  /** Диалог выбора файлов для нового письма — возвращает содержимое в base64. */
+  mailPickAttachments: 'mail:pickAttachments',
   mailListFolders: 'mail:listFolders',
   mailListFoldersForRules: 'mail:listFoldersForRules',
   mailCreateFolder: 'mail:createFolder',
@@ -137,9 +143,17 @@ export const CH = {
   /** Main → renderer: отпустили ⌘/Ctrl в вебвью — подтвердить switcher. */
   deskConfirmCycleWindow: 'desk:confirmCycleWindow',
   notifyTest: 'app:notifyTest',
+  /** Текущее состояние fullscreen — шапка спрашивает его при монтировании. */
+  windowIsFullScreen: 'window:isFullScreen',
+  /** Закрыть окно приложения — Kontur завершается. */
+  windowClose: 'window:close',
   mcpInfo: 'mcp:info',
   mcpAgents: 'mcp:agents',
   mcpConnect: 'mcp:connect',
+  /** Скиллы Kontur для агентов: список и куда разложены. */
+  mcpSkills: 'mcp:skills',
+  /** Разложить скиллы по конфигам агентов. */
+  mcpInstallSkills: 'mcp:installSkills',
 
   notesTree: 'notes:tree',
   notesRead: 'notes:read',

@@ -12,7 +12,7 @@ import { closeEasAgents } from './connectors/eas/http'
 import { destroyTray, initTray, notifyNew, refreshTrayBadge } from './tray'
 import { emitItemsChanged } from './notify/itemsChanged'
 import { startMeetingReminders, stopMeetingReminders } from './notify/reminders'
-import { startAutomations, stopAutomations } from './automations'
+import { onNewAttentionItems, startAutomations, stopAutomations } from './automations'
 import { ensureVault } from './notes/vault'
 import { registerIpc } from './ipc'
 import { disposeAllPtys } from './terminal/pty'
@@ -23,7 +23,6 @@ import { openSafeExternal } from './security/externalOpen'
 
 let win: BrowserWindow | null = null
 let views: ServiceViewManager | null = null
-let quitting = false
 let shuttingDown = false
 
 function createWindow(): void {
@@ -82,41 +81,28 @@ function createWindow(): void {
   views.onCycleWindow = (dir) => win?.webContents.send(CH.deskCycleWindow, dir)
   views.onConfirmCycleWindow = () => win?.webContents.send(CH.deskConfirmCycleWindow)
 
-  win.on('ready-to-show', () => {
-    win?.show()
-    // Светофор скрывается только в fullscreen; при zoom/maximize остаётся.
-    if (win && !win.isDestroyed()) {
-      win.webContents.send(CH.windowMaximizedChanged, win.isFullScreen())
-    }
-  })
+  // Светофор скрывается только в fullscreen; при zoom/maximize остаётся.
+  // Шапка рендерера знает об этом из события — и дополнительно спрашивает
+  // состояние сама при монтировании: заставка держит её 5 секунд, так что
+  // ранний сигнал из ready-to-show она просто не успевает услышать.
   const emitFullScreen = (): void => {
     if (!win || win.isDestroyed()) return
     win.webContents.send(CH.windowMaximizedChanged, win.isFullScreen())
   }
+  win.on('ready-to-show', () => {
+    win?.show()
+    emitFullScreen()
+  })
   win.on('enter-full-screen', emitFullScreen)
   win.on('leave-full-screen', emitFullScreen)
-  // Закрытие окна прячет приложение в трей, а не выгружает его: уведомления и
-  // синхронизация продолжают работать в фоне. Полный выход — через трей или Cmd+Q.
-  // macOS: hide() из native fullscreen оставляет чёрный Space — сначала выходим.
-  let hidingFromFullScreen = false
-  win.on('close', (e) => {
-    if (!quitting) {
-      e.preventDefault()
-      const w = win
-      if (!w || w.isDestroyed()) return
-      if (w.isFullScreen()) {
-        if (hidingFromFullScreen) return
-        hidingFromFullScreen = true
-        w.once('leave-full-screen', () => {
-          hidingFromFullScreen = false
-          if (!w.isDestroyed() && !quitting) w.hide()
-        })
-        w.setFullScreen(false)
-        return
-      }
-      w.hide()
-      return
-    }
+  win.on('show', emitFullScreen)
+  // Перезагрузка рендерера (dev-HMR, возврат из блокировки) начинается с
+  // чистого состояния — шлём ей текущий fullscreen сразу после загрузки.
+  win.webContents.on('did-finish-load', emitFullScreen)
+  // Закрытие окна = выход из приложения. Раньше окно пряталось в трей и
+  // Kontur продолжал работать невидимым — так его закрывали, а он оставался
+  // висеть в фоне. Полный выход теперь даёт и крестик, и Cmd+Q.
+  win.on('close', () => {
     // Пока окно ещё живо — снять WebContentsView, иначе на `closed` будет
     // "Object has been destroyed".
     views?.disposeAll()
@@ -186,7 +172,7 @@ app.whenReady().then(async () => {
   scheduler.on('items', () => {
     emitItemsChanged()
   })
-  scheduler.on('new-items', (items) =>
+  scheduler.on('new-items', (items) => {
     notifyNew(
       items,
       (target) => {
@@ -198,7 +184,12 @@ app.whenReady().then(async () => {
         win?.webContents.send(CH.joinMeeting, url)
       }
     )
-  )
+  })
+  // Автоматизации по событиям — отдельным потоком: они должны отработать и на
+  // первом синке после запуска (что пришло, пока приложение было закрыто).
+  scheduler.on('fresh-items', (items) => {
+    onNewAttentionItems(items)
+  })
   scheduler.on('error', ({ serviceId, error }) => console.warn(`[sync] ${serviceId}: ${error}`))
   scheduler.start()
   startAutomations()
@@ -239,13 +230,11 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  // На macOS живём в трее; на остальных платформах закрытие всех окон = выход.
-  if (process.platform !== 'darwin') app.quit()
+  // Закрыли окно — закрыли Kontur, на любой платформе.
+  app.quit()
 })
 
 app.on('before-quit', (e) => {
-  // Без этого флага обработчик close прячет окно в трей и выход не доходит.
-  quitting = true
   // Повторный before-quit после нашего app.exit не нужен.
   if (shuttingDown) return
   e.preventDefault()

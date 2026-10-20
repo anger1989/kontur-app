@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { Globe, Loader2 } from 'lucide-react'
 import { showServiceView } from '@/store'
-import { RESIZE_INSET, useViewBounds, WINDOW_CORNER_RADIUS } from '@/lib/viewHost'
+import { RESIZE_INSET, useViewBounds, useWindowCornerRadius } from '@/lib/viewHost'
 import { cn } from '@/lib/utils'
 
 /**
@@ -33,11 +33,12 @@ export function BrowserHost({
   const ref = useRef<HTMLDivElement>(null)
   const [snap, setSnap] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const cornerRadius = useWindowCornerRadius()
 
   useViewBounds(ref, tabId, {
     inset: maximized ? 0 : RESIZE_INSET,
     insetTop: 0,
-    borderRadius: maximized ? 0 : WINDOW_CORNER_RADIUS,
+    borderRadius: maximized ? 0 : cornerRadius,
     rect
   })
 

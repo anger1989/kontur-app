@@ -180,6 +180,10 @@ function merge(saved: Partial<AppConfig>): AppConfig {
   return {
     version: CONFIG_VERSION,
     theme: saved.theme ?? base.theme,
+    shell: saved.shell === 'kde' ? 'kde' : base.shell,
+    kdePinned: Array.isArray(saved.kdePinned)
+      ? saved.kdePinned.filter((k): k is string => typeof k === 'string')
+      : base.kdePinned,
     wallpaper:
       !saved.wallpaper ||
       (saved.wallpaper.kind === 'gradient' && saved.wallpaper.value === 'graphite') ||

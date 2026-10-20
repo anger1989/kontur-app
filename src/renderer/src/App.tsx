@@ -2,6 +2,8 @@ import { useEffect, useState, type JSX } from 'react'
 import { TitleBar } from '@/components/TitleBar'
 import { Desktop } from '@/components/Desktop'
 import { Dock } from '@/components/Dock'
+import { KdePanel } from '@/components/kde/KdePanel'
+import { KdeTitleBar } from '@/components/kde/KdeTitleBar'
 import { WindowSwitcher } from '@/components/WindowSwitcher'
 import { HotkeysDialog } from '@/components/HotkeysDialog'
 import { EnvEditorHost } from '@/components/EnvEditorHost'
@@ -22,6 +24,7 @@ export default function App(): JSX.Element {
   const ready = useStore((s) => s.ready)
   const config = useStore((s) => s.config)
   const resolvedTheme = useStore((s) => s.resolvedTheme)
+  const shell = useStore((s) => s.config?.shell ?? 'macos')
   const load = useStore((s) => s.load)
   const refreshStatuses = useStore((s) => s.refreshStatuses)
   const [splashDone, setSplashDone] = useState(false)
@@ -37,6 +40,12 @@ export default function App(): JSX.Element {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', resolvedTheme === 'dark')
   }, [resolvedTheme])
+
+  // Вид интерфейса виден и из CSS — от него зависят радиусы Breeze.
+  // Само окно приложения в обеих оболочках обычное, со светофором macOS.
+  useEffect(() => {
+    document.documentElement.dataset.shell = shell
+  }, [shell])
 
   useEffect(() => {
     const offTheme = window.kontur.theme.onChange((t) => useStore.setState({ resolvedTheme: t }))
@@ -92,11 +101,11 @@ export default function App(): JSX.Element {
   return (
     <IdleGuard>
       <div className="flex h-full flex-col bg-background">
-        <TitleBar />
+        {shell === 'macos' ? <TitleBar /> : <KdeTitleBar />}
 
         <div className="relative flex min-h-0 flex-1">
           <Desktop />
-          <Dock />
+          {shell === 'kde' ? <KdePanel /> : <Dock />}
         </div>
 
         <WindowSwitcher />

@@ -4,7 +4,7 @@ import { base, stripHtml } from '../http'
 import { itemId, type SyncContext, type SyncResult } from '../types'
 import { patchConfig, getConfig } from '../../config/store'
 import { logInfo, logWarn } from '../../log'
-import { EasClient, EAS_DEVICE_TYPE, EAS_PROTOCOL_VERSION, find, text, type Node } from './client'
+import { EasClient, EAS_DEVICE_TYPE, EAS_PROTOCOL_VERSION, find, findAll, text, type Node } from './client'
 import { easDnsProbe } from './dns'
 import { harvestEvent, harvestMail, rememberPeople, type SeenPerson } from '../../contacts/harvest'
 import {
@@ -516,5 +516,5 @@ export async function syncEas(ctx: SyncContext): Promise<SyncResult> {
   }
 }
 
-export { find, text }
+export { find, findAll, text }
 export type { Node }

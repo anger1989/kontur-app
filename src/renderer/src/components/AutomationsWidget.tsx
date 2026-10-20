@@ -12,15 +12,29 @@ function statusDot(a: AutomationView): string {
   return 'bg-muted-foreground/50'
 }
 
-function nextLabel(a: AutomationView): string {
+function triggerLabel(a: AutomationView): string {
   if (!a.enabled) return 'выкл'
-  if (a.nextRunAt == null) return '—'
+  if (a.trigger.type === 'event') {
+    const f = a.trigger.filter
+    const bits: string[] = [a.trigger.event]
+    if (f?.authorContains) bits.push(`from:${f.authorContains}`)
+    if (f?.titleContains) bits.push(`«${f.titleContains}»`)
+    if (f?.minutesBefore != null) bits.push(`${f.minutesBefore}м`)
+    return bits.join(' · ')
+  }
+  const f = a.trigger.filter
+  const poll = f?.authorContains
+    ? ` · unread from:${f.authorContains}`
+    : f
+      ? ' · unread mail'
+      : ''
+  if (a.nextRunAt == null) return `${a.trigger.cron}${poll}`
   const d = new Date(a.nextRunAt)
   const dd = String(d.getDate()).padStart(2, '0')
   const mm = String(d.getMonth() + 1).padStart(2, '0')
   const hh = String(d.getHours()).padStart(2, '0')
   const mi = String(d.getMinutes()).padStart(2, '0')
-  return `${dd}.${mm} ${hh}:${mi}`
+  return `след. ${dd}.${mm} ${hh}:${mi} · ${a.trigger.cron}${poll}`
 }
 
 function Row({
@@ -69,7 +83,7 @@ function Row({
               ? item.lastError
               : item.lastSummary
                 ? item.lastSummary
-                : `след. ${nextLabel(item)} · ${item.schedule.cron}`}
+                : triggerLabel(item)}
           </p>
         </div>
       </div>
@@ -77,7 +91,7 @@ function Row({
   )
 }
 
-/** Виджет локальных cron-сценариев на рабочем столе. */
+/** Виджет локальных сценариев (cron + event) на рабочем столе. */
 export function AutomationsWidget({ bare }: { bare?: boolean } = {}): JSX.Element | null {
   const [items, setItems] = useState<AutomationView[]>([])
 

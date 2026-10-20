@@ -33,7 +33,7 @@ import { AutomationsWidget } from './AutomationsWidget'
 import { AnimatedList } from '@/components/ui/animated-list'
 import { GlowingEffect } from '@/components/ui/glowing-effect'
 import { WidgetHeader } from '@/components/ui/stats-card'
-import { DOCK_CLEARANCE } from '@/lib/deskLayout'
+import { shellClearance } from '@/lib/deskLayout'
 import { toast } from '@/components/ui/toast'
 import { WIDGET_IDS, WIDGET_TITLES, type WidgetId, type WidgetLayout } from '@shared/types'
 import { cn } from '@/lib/utils'
@@ -446,7 +446,7 @@ function placeWidgets(
 ): Record<string, Box> {
   const colW = width + WIDGET_GAP
   const cols = Math.max(1, Math.floor((desk.width - EDGE * 2 + WIDGET_GAP) / colW))
-  const bottom = Math.max(ROW, desk.height - DOCK_CLEARANCE - EDGE)
+  const bottom = Math.max(ROW, desk.height - shellClearance() - EDGE)
   /** col 0 — самая правая. */
   const xOf = (col: number): number => desk.width - EDGE - width - col * colW
   const colOf = (x: number): number =>
@@ -593,7 +593,7 @@ export function TodayWidgets(): JSX.Element | null {
   if (desk.width < 460) return null
 
   const width = Math.round(Math.max(260, Math.min(360, desk.width * 0.34)))
-  const maxHeight = Math.max(160, desk.height - DOCK_CLEARANCE - EDGE * 2)
+  const maxHeight = Math.max(160, desk.height - shellClearance() - EDGE * 2)
   // Длинный список «Требует внимания» не должен сам по себе занимать колонку.
   const listHeight = Math.max(120, Math.min(288, Math.round(maxHeight * 0.45)))
 

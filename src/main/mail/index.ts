@@ -1,10 +1,16 @@
 import { randomUUID } from 'node:crypto'
+import { promises as fsp } from 'node:fs'
 import { connect as tlsConnect } from 'node:tls'
 import { Socket } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { app, dialog, shell, type BrowserWindow } from 'electron'
 import type {
+  MailAttachment,
   MailDetail,
   MailFolder,
   MailMailbox,
+  MailOutgoingAttachment,
   MailRule,
   MailRuleUpsert,
   MailSendPayload
@@ -13,7 +19,7 @@ import { getConfig } from '../config/store'
 import { getSecret } from '../config/secrets'
 import { getItem, markItemsUnread, setItemFlagged, upsertItems } from '../db'
 import type { SyncContext } from '../connectors/types'
-import { createEasClient, extractBody, find, text } from '../connectors/eas'
+import { createEasClient, extractBody, find, findAll, text, type Node } from '../connectors/eas'
 import {
   createEwsFolder,
   deleteEwsRule,
@@ -82,6 +88,65 @@ function stripFolderPrefix(nativeId: string, protocol: string): string {
 
 /** Прочитать письмо целиком (с телом). Помечает прочитанным локально и на сервере.
  *  Если сервер недоступен/401 — отдаём кэш, но локально всё равно «прочитано». */
+/**
+ * Потолок на письмо: Exchange по умолчанию режет вложения на ~25-35 МБ, а
+ * base64 раздувает их ещё на треть. Лучше сказать об этом до отправки.
+ */
+const MAX_ATTACHMENTS_BYTES = 20 * 1024 * 1024
+
+/** MIME-тип по расширению — сервер присылает ContentType не всегда. */
+const MIME_BY_EXT: Record<string, string> = {
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  txt: 'text/plain',
+  csv: 'text/csv',
+  html: 'text/html',
+  zip: 'application/zip',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  eml: 'message/rfc822',
+  msg: 'application/vnd.ms-outlook'
+}
+
+export function mimeForName(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  return MIME_BY_EXT[ext] ?? 'application/octet-stream'
+}
+
+/**
+ * Вложения письма из ApplicationData (EAS).
+ *
+ * `FileReference` — то, чем потом качаем содержимое; без него вложение
+ * показывать бессмысленно, такие пропускаем.
+ */
+function parseEasAttachments(data: Node | null): MailAttachment[] {
+  const out: MailAttachment[] = []
+  for (const node of findAll(data, 'Attachment')) {
+    const id = text(node, 'FileReference')
+    if (!id) continue
+    const name = text(node, 'DisplayName') || 'Вложение'
+    const size = Number(text(node, 'EstimatedDataSize') ?? '')
+    out.push({
+      id,
+      name,
+      size: Number.isFinite(size) && size > 0 ? size : null,
+      mime: text(node, 'ContentType') || mimeForName(name),
+      inline: text(node, 'IsInline') === '1',
+      contentId: text(node, 'ContentId')
+    })
+  }
+  return out
+}
+
 export async function getMail(itemId: string): Promise<MailDetail> {
   const { serviceId, nativeId } = parseMailId(itemId)
   const existing = getItem(itemId)
@@ -133,7 +198,8 @@ export async function getMail(itemId: string): Promise<MailDetail> {
         date: received ? Date.parse(received) || Date.now() : Date.now(),
         bodyText: bodyText || '(пустое письмо)',
         bodyHtml: html,
-        unread: false
+        unread: false,
+        attachments: parseEasAttachments(data)
       }
     } else if (protocol === 'exchange') {
       const m = await fetchEwsMessage(ctx, nativeId)
@@ -145,7 +211,9 @@ export async function getMail(itemId: string): Promise<MailDetail> {
         date: m.date,
         bodyText: m.text,
         bodyHtml: m.html,
-        unread: false
+        unread: false,
+        // Вложения по этому протоколу пока не перечисляем (см. getMailAttachment).
+        attachments: []
       }
     } else if (protocol === 'jmap') {
       const m = await fetchJmapMessage(ctx, stripFolderPrefix(nativeId, protocol))
@@ -157,7 +225,9 @@ export async function getMail(itemId: string): Promise<MailDetail> {
         date: m.date,
         bodyText: m.text,
         bodyHtml: m.html,
-        unread: false
+        unread: false,
+        // Вложения по этому протоколу пока не перечисляем (см. getMailAttachment).
+        attachments: []
       }
     } else if (protocol === 'imap') {
       const folder = nativeId.includes(':') ? nativeId.split(':')[0] : 'inbox'
@@ -170,7 +240,9 @@ export async function getMail(itemId: string): Promise<MailDetail> {
         date: m.date,
         bodyText: m.text,
         bodyHtml: m.html,
-        unread: false
+        unread: false,
+        // Вложения по этому протоколу пока не перечисляем (см. getMailAttachment).
+        attachments: []
       }
     } else {
       throw new Error(`Протокол «${protocol}» не поддерживает чтение писем`)
@@ -192,7 +264,8 @@ export async function getMail(itemId: string): Promise<MailDetail> {
           existing.body ||
           `Не удалось загрузить полное письмо: ${err instanceof Error ? err.message : String(err)}`,
         bodyHtml: null,
-        unread: false
+        unread: false,
+        attachments: []
       }
     }
     throw err
@@ -200,6 +273,106 @@ export async function getMail(itemId: string): Promise<MailDetail> {
 
   persistRead(detail.bodyText)
   return { id: itemId, serviceId, ...detail, unread: false }
+}
+
+/**
+ * Содержимое вложения с сервера.
+ *
+ * Пока умеет EAS (на нём работают оба почтовых контура). Для остальных
+ * протоколов честно говорим, что вложение скачать нечем, — это лучше, чем
+ * молча отдать пустой файл.
+ */
+export async function getMailAttachment(
+  itemId: string,
+  attachmentId: string
+): Promise<{ data: Buffer; mime: string | null }> {
+  const { serviceId } = parseMailId(itemId)
+  const ctx = contextFor(serviceId)
+  const protocol = protocolOf(ctx)
+  if (protocol !== 'eas') {
+    throw new Error(`Скачивание вложений для протокола «${protocol}» пока не поддерживается`)
+  }
+  const client = await createEasClient(ctx)
+  return client.fetchAttachment(attachmentId)
+}
+
+/**
+ * Открывать вложение системой можно не всё: исполняемые файлы и образы дисков
+ * запускают чужой код одним кликом. Их только сохраняем — как делает Outlook.
+ */
+const UNSAFE_EXT = new Set([
+  'app', 'bat', 'cmd', 'com', 'command', 'dmg', 'exe', 'jar', 'js', 'jse', 'msi',
+  'osx', 'pkg', 'ps1', 'reg', 'scpt', 'scr', 'sh', 'terminal', 'vb', 'vbs', 'workflow'
+])
+
+/** Имя файла без путей и управляющих символов — его присылает сервер. */
+function safeFileName(name: string): string {
+  const base = name.split(/[\\/]/).pop() ?? 'attachment'
+  const clean = base.replace(/[\u0000-\u001f:]/g, '_').trim()
+  return clean || 'attachment'
+}
+
+/** Скачать вложение и открыть системным приложением. */
+export async function openMailAttachment(
+  itemId: string,
+  attachment: { id: string; name: string }
+): Promise<void> {
+  const name = safeFileName(attachment.name)
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  if (UNSAFE_EXT.has(ext)) {
+    throw new Error('Такие вложения Kontur не открывает — сохраните файл и откройте сами')
+  }
+  const { data } = await getMailAttachment(itemId, attachment.id)
+  // Отдельная папка на каждое открытие: одинаковые имена из разных писем
+  // не должны перетирать друг друга, пока файл открыт.
+  const dir = join(tmpdir(), 'kontur-attachments', randomUUID().slice(0, 8))
+  await fsp.mkdir(dir, { recursive: true })
+  const file = join(dir, name)
+  await fsp.writeFile(file, data, { mode: 0o600 })
+  const err = await shell.openPath(file)
+  if (err) throw new Error(err)
+}
+
+/** Скачать вложение и сохранить через диалог. Возвращает путь или null. */
+export async function saveMailAttachment(
+  win: BrowserWindow | null,
+  itemId: string,
+  attachment: { id: string; name: string }
+): Promise<string | null> {
+  const name = safeFileName(attachment.name)
+  const opts = {
+    title: 'Сохранить вложение',
+    defaultPath: join(app.getPath('downloads'), name)
+  }
+  const res = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+  if (res.canceled || !res.filePath) return null
+  const { data } = await getMailAttachment(itemId, attachment.id)
+  await fsp.writeFile(res.filePath, data)
+  return res.filePath
+}
+
+/** Диалог выбора файлов для письма. Содержимое сразу в base64 — его шлём как есть. */
+export async function pickMailAttachments(
+  win: BrowserWindow | null
+): Promise<MailOutgoingAttachment[]> {
+  if (!win) return []
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Прикрепить файлы',
+    properties: ['openFile', 'multiSelections']
+  })
+  if (res.canceled) return []
+  const out: MailOutgoingAttachment[] = []
+  let total = 0
+  for (const path of res.filePaths) {
+    const buf = await fsp.readFile(path)
+    total += buf.length
+    if (total > MAX_ATTACHMENTS_BYTES) {
+      throw new Error(`Вложения больше ${Math.round(MAX_ATTACHMENTS_BYTES / 1024 / 1024)} МБ — такое письмо сервер не примет`)
+    }
+    const name = safeFileName(path.split('/').pop() ?? 'file')
+    out.push({ name, mime: mimeForName(name), data: buf.toString('base64') })
+  }
+  return out
 }
 
 /** Фоновая попытка пометить на сервере (для fallback-пути). */
@@ -259,6 +432,14 @@ export async function sendMail(payload: MailSendPayload): Promise<void> {
     ? `<${payload.replyToId.replace(/[^\w.@+-]/g, '_')}@kontur.local>`
     : undefined
 
+  const attachments = payload.attachments ?? []
+  const attachmentsBytes = attachments.reduce((n, a) => n + Math.ceil(a.data.length * 0.75), 0)
+  if (attachmentsBytes > MAX_ATTACHMENTS_BYTES) {
+    throw new Error(
+      `Вложения больше ${Math.round(MAX_ATTACHMENTS_BYTES / 1024 / 1024)} МБ — такое письмо сервер не примет`
+    )
+  }
+
   if (protocol === 'eas') {
     const mime = buildMime({
       from,
@@ -267,7 +448,8 @@ export async function sendMail(payload: MailSendPayload): Promise<void> {
       bcc: payload.bcc,
       subject: payload.subject,
       body: payload.body,
-      inReplyTo
+      inReplyTo,
+      attachments
     })
     const client = await createEasClient(ctx)
     await client.sendMail(mime, randomUUID().replace(/-/g, '').slice(0, 16))
@@ -275,6 +457,9 @@ export async function sendMail(payload: MailSendPayload): Promise<void> {
   }
 
   if (protocol === 'exchange') {
+    if (attachments.length) {
+      throw new Error('Отправка вложений через EWS пока не поддерживается')
+    }
     await sendEwsMail(ctx, {
       to: payload.to,
       cc: payload.cc,
@@ -304,7 +489,8 @@ export async function sendMail(payload: MailSendPayload): Promise<void> {
     bcc: payload.bcc,
     subject: payload.subject,
     body: payload.body,
-    inReplyTo
+    inReplyTo,
+    attachments
   })
 }
 
@@ -314,6 +500,17 @@ export function markMailRead(itemId: string): void {
   if (!existing || !existing.unread) return
   upsertItems([{ ...existing, unread: false, state: 'прочитано' }])
   emitItemsChanged()
+}
+
+/** Локально + best-effort на сервере (EAS). Для шагов автоматизаций. */
+export async function markMailReadFully(itemId: string): Promise<void> {
+  markMailRead(itemId)
+  try {
+    const { serviceId, nativeId } = parseMailId(itemId)
+    await markReadOnServer(serviceId, nativeId)
+  } catch {
+    /* локальной отметки достаточно, чтобы poll не зациклился */
+  }
 }
 
 /** Пометить непрочитанным локально + best-effort на сервере. */
@@ -329,6 +526,34 @@ export function setMailFlagged(itemId: string, flagged: boolean): void {
   if (setItemFlagged(itemId, flagged)) emitItemsChanged()
 }
 
+/** base64 строками по 76 символов, как требует RFC 2045. */
+function base64Lines(data: string): string {
+  return (data.replace(/\s+/g, '').match(/.{1,76}/g) ?? []).join('\r\n')
+}
+
+/** Имя файла в заголовке: RFC 2047, если оно не чисто латинское. */
+function encodeFileName(name: string): string {
+  return /^[\x20-\x7e]*$/.test(name) ? name : encodeSubject(name)
+}
+
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+function mimePart(
+  boundary: string,
+  headers: string[],
+  body: string
+): string {
+  return [`--${boundary}`, ...headers, '', body].join('\r\n')
+}
+
+/**
+ * Письмо в MIME. Без вложений — обычный text/plain, как было.
+ *
+ * С вложениями собираем multipart/mixed. Картинки, вставленные в тело через
+ * Ctrl+V, уходят внутри multipart/related с cid-ссылками: получатель в Outlook
+ * видит их прямо в письме, а не файлами снизу.
+ */
 function buildMime(p: {
   from: string
   to: string
@@ -337,23 +562,95 @@ function buildMime(p: {
   subject: string
   body: string
   inReplyTo?: string
+  attachments?: MailOutgoingAttachment[]
 }): string {
-  const lines = [
+  const headers = [
     `From: ${p.from}`,
     `To: ${p.to}`,
     ...(p.cc?.trim() ? [`Cc: ${p.cc.trim()}`] : []),
     ...(p.bcc?.trim() ? [`Bcc: ${p.bcc.trim()}`] : []),
     `Subject: ${encodeSubject(p.subject)}`,
-    ...(p.inReplyTo
-      ? [`In-Reply-To: ${p.inReplyTo}`, `References: ${p.inReplyTo}`]
-      : []),
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    p.body.replace(/\r?\n/g, '\r\n')
+    ...(p.inReplyTo ? [`In-Reply-To: ${p.inReplyTo}`, `References: ${p.inReplyTo}`] : []),
+    'MIME-Version: 1.0'
   ]
-  return lines.join('\r\n')
+  const plain = p.body.replace(/\r?\n/g, '\r\n')
+  const all = p.attachments ?? []
+
+  if (!all.length) {
+    return [
+      ...headers,
+      'Content-Type: text/plain; charset=utf-8',
+      'Content-Transfer-Encoding: 8bit',
+      '',
+      plain
+    ].join('\r\n')
+  }
+
+  const inline = all.filter((a) => a.inline)
+  const files = all.filter((a) => !a.inline)
+  const stamp = randomUUID().replace(/-/g, '')
+  const mixed = `mixed_${stamp}`
+  const related = `related_${stamp}`
+
+  const cidOf = (i: number): string => `img${i}.${stamp}@kontur.local`
+
+  // Тело: либо plain text, либо related с html и картинками.
+  let bodyPart: string
+  if (inline.length) {
+    const html = [
+      '<html><body>',
+      `<div style="white-space:pre-wrap;font-family:sans-serif">${escapeHtml(p.body)}</div>`,
+      ...inline.map((_, i) => `<div><img src="cid:${cidOf(i)}" style="max-width:100%"></div>`),
+      '</body></html>'
+    ].join('')
+    bodyPart = [
+      mimePart(mixed, [`Content-Type: multipart/related; boundary="${related}"`], ''),
+      mimePart(
+        related,
+        ['Content-Type: text/html; charset=utf-8', 'Content-Transfer-Encoding: 8bit'],
+        html
+      ),
+      ...inline.map((a, i) =>
+        mimePart(
+          related,
+          [
+            `Content-Type: ${a.mime}; name="${encodeFileName(a.name)}"`,
+            `Content-ID: <${cidOf(i)}>`,
+            `Content-Disposition: inline; filename="${encodeFileName(a.name)}"`,
+            'Content-Transfer-Encoding: base64'
+          ],
+          base64Lines(a.data)
+        )
+      ),
+      `--${related}--`
+    ].join('\r\n')
+  } else {
+    bodyPart = mimePart(
+      mixed,
+      ['Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: 8bit'],
+      plain
+    )
+  }
+
+  return [
+    ...headers,
+    `Content-Type: multipart/mixed; boundary="${mixed}"`,
+    '',
+    bodyPart,
+    ...files.map((a) =>
+      mimePart(
+        mixed,
+        [
+          `Content-Type: ${a.mime}; name="${encodeFileName(a.name)}"`,
+          `Content-Disposition: attachment; filename="${encodeFileName(a.name)}"`,
+          'Content-Transfer-Encoding: base64'
+        ],
+        base64Lines(a.data)
+      )
+    ),
+    `--${mixed}--`,
+    ''
+  ].join('\r\n')
 }
 
 function encodeSubject(s: string): string {
@@ -375,6 +672,7 @@ async function sendSmtp(opts: {
   subject: string
   body: string
   inReplyTo?: string
+  attachments?: MailOutgoingAttachment[]
 }): Promise<void> {
   const recipients = [
     ...opts.to.split(/[,;]/),
@@ -450,7 +748,8 @@ async function sendSmtp(opts: {
       bcc: opts.bcc,
       subject: opts.subject,
       body: opts.body,
-      inReplyTo: opts.inReplyTo
+      inReplyTo: opts.inReplyTo,
+      attachments: opts.attachments
     })
     socket.write(mime.replace(/^\./gm, '..') + '\r\n.\r\n')
     r = await read()

@@ -26,6 +26,7 @@ import type {
   MailDetail,
   MailFolder,
   MailMailbox,
+  MailOutgoingAttachment,
   MailRule,
   ServiceConfig
 } from '@shared/types'
@@ -33,6 +34,11 @@ import { useStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  ComposeAttachments,
+  MailAttachmentList,
+  attachmentPasteHandler
+} from '@/components/MailAttachments'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { FilterChip, HtmlWithExternalLinks, LinkifiedText } from '@/components/LinkifiedText'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -388,7 +394,8 @@ export function Mail({
           date: fallback.updatedAt,
           bodyText: fallback.body || 'Не удалось загрузить тело письма.',
           bodyHtml: null,
-          unread: fallback.unread
+          unread: fallback.unread,
+          attachments: []
         })
       }
     } finally {
@@ -969,6 +976,8 @@ export function Mail({
                   </div>
                 </div>
 
+                <MailAttachmentList itemId={detail.id} attachments={detail.attachments ?? []} />
+
                 {composeMode && (
                   <ComposeReplyPane
                     key={`${detail.id}:${composeMode}`}
@@ -1386,6 +1395,8 @@ function ComposeReplyPane({
       : `Re: ${stripSubjectPrefix(detail.subject, 're')}`
   const [subject, setSubject] = useState(baseSubject)
   const [body, setBody] = useState(() => (mode === 'forward' ? buildQuote(detail).trimStart() : ''))
+  const [attachments, setAttachments] = useState<MailOutgoingAttachment[]>([])
+  const onPaste = attachmentPasteHandler((added) => setAttachments((cur) => [...cur, ...added]))
 
   const title =
     mode === 'reply' ? 'Ответить' : mode === 'replyAll' ? 'Ответить всем' : 'Переслать'
@@ -1413,7 +1424,8 @@ function ComposeReplyPane({
         bcc: bcc.trim() || undefined,
         subject: subject.trim() || baseSubject,
         body: quoted,
-        replyToId: mode === 'forward' ? undefined : detail.id
+        replyToId: mode === 'forward' ? undefined : detail.id,
+        attachments: attachments.length ? attachments : undefined
       })
       onSent()
     } catch (e) {
@@ -1465,11 +1477,17 @@ function ComposeReplyPane({
       <Textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
-        placeholder={mode === 'forward' ? 'Комментарий к пересылке…' : 'Текст ответа…'}
+        onPaste={onPaste}
+        placeholder={
+          mode === 'forward'
+            ? 'Комментарий к пересылке… (Ctrl+V вставит скриншот)'
+            : 'Текст ответа… (Ctrl+V вставит скриншот)'
+        }
         className="min-h-24 text-[13px]"
         autoFocus
       />
-      <div className="mt-2 flex justify-end">
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <ComposeAttachments items={attachments} onChange={setAttachments} disabled={sending} />
         <Button size="sm" onClick={() => void send()} disabled={sending}>
           <Send />
           {sending ? 'Отправка…' : 'Отправить'}
@@ -1497,6 +1515,8 @@ function ComposePane({
   const [showBcc, setShowBcc] = useState(false)
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
+  const [attachments, setAttachments] = useState<MailOutgoingAttachment[]>([])
+  const onPaste = attachmentPasteHandler((added) => setAttachments((cur) => [...cur, ...added]))
 
   const send = async (): Promise<void> => {
     if (!to.trim()) {
@@ -1511,7 +1531,8 @@ function ComposePane({
         cc: cc.trim() || undefined,
         bcc: bcc.trim() || undefined,
         subject: subject.trim() || '(без темы)',
-        body: body
+        body: body,
+        attachments: attachments.length ? attachments : undefined
       })
       toast.success('Письмо отправлено')
       onClose()
@@ -1591,10 +1612,12 @@ function ComposePane({
       <Textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
-        placeholder="Текст письма…"
+        onPaste={onPaste}
+        placeholder="Текст письма… Ctrl+V вставит скриншот или файл из буфера"
         className="min-h-0 flex-1 resize-none rounded-none border-0 text-[13px] focus-visible:ring-0"
       />
-      <div className="flex justify-end border-t px-5 py-2.5">
+      <div className="flex items-center justify-between gap-2 border-t px-5 py-2.5">
+        <ComposeAttachments items={attachments} onChange={setAttachments} disabled={sending} />
         <Button size="sm" onClick={() => void send()} disabled={sending}>
           <Send />
           {sending ? 'Отправка…' : 'Отправить'}

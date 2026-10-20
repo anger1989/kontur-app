@@ -1,25 +1,13 @@
-import { useEffect, useState, type JSX } from 'react'
-import {
-  Bookmark,
-  CalendarDays,
-  Globe,
-  Kanban,
-  ListTodo,
-  Mail,
-  NotebookPen,
-  TerminalSquare,
-  type LucideIcon
-} from 'lucide-react'
-import { computeAttention } from '@shared/attention'
-import { useStore, type Route } from '@/store'
-import { ServiceIcon } from './ServiceIcon'
+import { type JSX, type ReactNode } from 'react'
+import { useStore } from '@/store'
+import { routeKey, useShellApps } from '@/lib/shellApps'
 import { Dock as DockBar, type DockItem } from '@/components/ui/dock'
 
 /** Строка-бейдж поверх маленькой иконки дока — счётчик уместнее точки на 40px. */
-function Badge({ icon: Icon, count }: { icon: LucideIcon; count?: number }): JSX.Element {
+function Badge({ children, count }: { children: ReactNode; count?: number }): JSX.Element {
   return (
     <span className="relative flex h-full w-full items-center justify-center">
-      <Icon className="h-full w-full text-neutral-700 dark:text-white/95" />
+      {children}
       {count ? (
         <span className="absolute -top-1.5 -right-2 rounded-full bg-primary px-1 text-[9px] leading-[14px] font-semibold text-primary-foreground tabular-nums">
           {count > 99 ? '99+' : count}
@@ -32,187 +20,42 @@ function Badge({ icon: Icon, count }: { icon: LucideIcon; count?: number }): JSX
 /**
  * Док рабочего стола: страницы приложения + сервисы по контурам.
  * Клик открывает/поднимает окно; точка — окно открыто; подъём — окно в фокусе.
+ *
+ * Сам список пунктов — общий с панелью KDE (см. lib/shellApps).
  */
 export function Dock(): JSX.Element {
-  const config = useStore((s) => s.config)
   const openWindow = useStore((s) => s.openWindow)
   const deskWidth = useStore((s) => s.desktop.width)
+  const apps = useShellApps()
   // Ключи открытых роутов — стабильны при драге окон (меняются только x/y).
-  const openKeys = useStore((s) =>
-    s.windows
-      .map((w) =>
-        w.route.kind === 'page' ? `page:${w.route.page}` : `service:${w.route.serviceId}`
-      )
-      .sort()
-      .join('|')
-  )
+  const openKeys = useStore((s) => s.windows.map((w) => routeKey(w.route)).sort().join('|'))
   // Верхнее несвёрнутое окно — только его иконка приподнята.
   const focusedKey = useStore((s) => {
-    const top = [...s.windows]
-      .filter((w) => !w.minimized)
-      .sort((a, b) => b.z - a.z)[0]
-    if (!top) return ''
-    return top.route.kind === 'page'
-      ? `page:${top.route.page}`
-      : `service:${top.route.serviceId}`
-  })
-  const [badges, setBadges] = useState({
-    mailUnread: 0,
-    todayActive: 0,
-    calendarToday: 0,
-    tasksOpen: 0,
-    todosOpen: 0,
-    byService: new Map<string, number>()
+    const top = [...s.windows].filter((w) => !w.minimized).sort((a, b) => b.z - a.z)[0]
+    return top ? routeKey(top.route) : ''
   })
 
-  useEffect(() => {
-    const load = (): void => {
-      void window.kontur.items.query({ limit: 2000 }).then((list) => setBadges(computeAttention(list)))
+  const open = new Set(openKeys.split('|'))
+
+  const items: DockItem[] = apps.map((app, i) => {
+    const prev = apps[i - 1]
+    return {
+      title: app.envShort ? `${app.envShort} · ${app.title}` : app.title,
+      icon: (
+        <Badge count={app.groupKey === 'pages' ? app.count : undefined}>
+          {app.icon({
+            size: 32,
+            className: 'h-full w-full text-neutral-700 dark:text-white/95'
+          })}
+        </Badge>
+      ),
+      open: open.has(app.key),
+      focused: focusedKey === app.key,
+      // Разделитель между страницами приложения и каждой группой сервисов.
+      separatorBefore: Boolean(prev) && prev!.groupKey !== app.groupKey,
+      onClick: () => openWindow(app.route)
     }
-    load()
-    return window.kontur.items.onChange(load)
-  }, [])
-
-  const routeKey = (route: Route): string =>
-    route.kind === 'page' ? `page:${route.page}` : `service:${route.serviceId}`
-
-  const isOpen = (route: Route): boolean => openKeys.split('|').includes(routeKey(route))
-  const isFocused = (route: Route): boolean => focusedKey === routeKey(route)
-
-  const page = (
-    p:
-      | 'today'
-      | 'mail'
-      | 'calendar'
-      | 'tasks'
-      | 'planner'
-      | 'notes'
-      | 'files'
-      | 'bookmarks'
-      | 'browser'
-      | 'settings'
-      | 'terminal'
-  ): Route => ({
-    kind: 'page',
-    page: p
   })
-
-  const hasComms = (config?.services ?? []).some(
-    (s) => (s.kind === 'mail' || s.kind === 'calendar') && s.enabled
-  )
-  const anyTasks = (config?.services ?? []).some((s) => s.kind === 'jira' && s.enabled)
-  const envs = (config?.envs ?? []).filter((e) => e.enabled)
-
-  const items: DockItem[] = [
-    // «Мой день» теперь живёт виджетами прямо на рабочем столе (см. Desktop.tsx) —
-    // открывать его окном как приложение больше не нужно, иконки в доке нет.
-    ...(hasComms
-      ? [
-          {
-            title: 'Почта',
-            icon: <Badge icon={Mail} count={badges.mailUnread} />,
-            open: isOpen(page('mail')),
-            focused: isFocused(page('mail')),
-            onClick: () => openWindow(page('mail'))
-          },
-          {
-            title: 'Календарь',
-            icon: <Badge icon={CalendarDays} count={badges.calendarToday} />,
-            open: isOpen(page('calendar')),
-            focused: isFocused(page('calendar')),
-            onClick: () => openWindow(page('calendar'))
-          }
-        ]
-      : []),
-    ...(anyTasks
-      ? [
-          {
-            title: 'Задачи',
-            icon: <Badge icon={Kanban} count={badges.tasksOpen} />,
-            open: isOpen(page('tasks')),
-            focused: isFocused(page('tasks')),
-            onClick: () => openWindow(page('tasks'))
-          }
-        ]
-      : []),
-    {
-      title: 'Планировщик',
-      icon: <Badge icon={ListTodo} count={badges.todosOpen} />,
-      open: isOpen(page('planner')),
-      focused: isFocused(page('planner')),
-      onClick: () => openWindow(page('planner'))
-    },
-    {
-      title: 'Заметки',
-      icon: <NotebookPen className="h-full w-full text-neutral-700 dark:text-white/95" />,
-      open: isOpen(page('notes')),
-      focused: isFocused(page('notes')),
-      onClick: () => openWindow(page('notes'))
-    },
-    {
-      title: 'Закладки',
-      icon: <Bookmark className="h-full w-full text-neutral-700 dark:text-white/95" />,
-      open: isOpen(page('bookmarks')),
-      focused: isFocused(page('bookmarks')),
-      onClick: () => openWindow(page('bookmarks'))
-    },
-    {
-      title: 'Браузер',
-      icon: <Globe className="h-full w-full text-neutral-700 dark:text-white/95" />,
-      open: isOpen(page('browser')),
-      focused: isFocused(page('browser')),
-      onClick: () => openWindow(page('browser'))
-    },
-    {
-      title: 'Терминал',
-      icon: <TerminalSquare className="h-full w-full text-neutral-700 dark:text-white/95" />,
-      open: isOpen(page('terminal')),
-      focused: isFocused(page('terminal')),
-      onClick: () => openWindow(page('terminal'))
-    },
-    // Общие сервисы (Mattermost, Толк…) — порядок как в настройках (`order`).
-    ...(() => {
-      const shared = (config?.services ?? [])
-        .filter(
-          (s) =>
-            s.envId === 'shared' && s.enabled && s.kind !== 'mail' && s.kind !== 'calendar'
-        )
-        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name, 'ru'))
-      return shared.map((s, i) => {
-        const route: Route = { kind: 'service', serviceId: s.id }
-        return {
-          title: s.name,
-          icon: <ServiceIcon serviceId={s.id} kind={s.kind} size={32} />,
-          open: isOpen(route),
-          focused: isFocused(route),
-          separatorBefore: i === 0,
-          onClick: () => openWindow(route)
-        }
-      })
-    })(),
-    // Сервисы по контурам — почта/календарь уже вынесены отдельными иконками выше.
-    ...envs
-      .filter((e) => e.id !== 'shared')
-      .flatMap((env, envIdx) =>
-        (config?.services ?? [])
-          .filter(
-            (s) =>
-              s.envId === env.id && s.enabled && s.kind !== 'mail' && s.kind !== 'calendar'
-          )
-          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name, 'ru'))
-          .map((s, i) => {
-            const route: Route = { kind: 'service', serviceId: s.id }
-            return {
-              title: `${env.short} · ${s.name}`,
-              icon: <ServiceIcon serviceId={s.id} kind={s.kind} size={32} />,
-              open: isOpen(route),
-              focused: isFocused(route),
-              separatorBefore: envIdx === 0 ? i === 0 : i === 0,
-              onClick: () => openWindow(route)
-            }
-          })
-      )
-  ]
 
   const setDockElevated = useStore((s) => s.setDockElevated)
 

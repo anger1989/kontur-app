@@ -10,11 +10,12 @@ import type {
   ThemePref
 } from '@shared/types'
 import {
-  DOCK_CLEARANCE,
   fitRect,
   isOccludedByHigher,
   maximizedRect,
-  peekRects
+  peekRects,
+  setShellLayout,
+  shellClearance
 } from '@/lib/deskLayout'
 
 export type AppPage =
@@ -420,7 +421,7 @@ function tileRects(
   const margin = 20
   const cols = Math.max(1, Math.ceil(Math.sqrt(n)))
   const rows = Math.max(1, Math.ceil(n / cols))
-  const usableHeight = Math.max(160, desktop.height - DOCK_CLEARANCE)
+  const usableHeight = Math.max(160, desktop.height - shellClearance())
   const cellW = Math.max(200, (desktop.width - margin * (cols + 1)) / cols)
   const cellH = Math.max(140, (usableHeight - margin * (rows + 1)) / rows)
   return Array.from({ length: n }, (_, i) => {
@@ -1047,6 +1048,28 @@ export const useStore = create<State>((set, get) => ({
     set({ statuses: await window.kontur.env.status() })
   }
 }))
+
+/**
+ * Вид интерфейса меняет высоту нижней полосы: у macOS это док (90px), у KDE —
+ * плоская панель (45px). От неё считаются и свободные окна, и клип нативных
+ * вебвью, поэтому держим её в deskLayout синхронно с конфигом и один раз
+ * вписываем открытые окна в обновившийся стол.
+ */
+useStore.subscribe((state, prev) => {
+  if (state.config?.shell === prev.config?.shell) return
+  setShellLayout(state.config?.shell === 'kde' ? 'kde' : 'macos')
+  const desk = state.desktop
+  useStore.setState({
+    windows: state.windows.map((w) =>
+      w.minimized
+        ? w
+        : w.maximized
+          ? { ...w, ...maximizedRect(desk) }
+          : { ...w, ...fitRect(w, desk) }
+    )
+  })
+  window.dispatchEvent(new Event('kontur:view-bounds-tick'))
+})
 
 /** Автосейв окон: debounce + flush при уходе со страницы / скрытии окна. */
 let persistTimer: ReturnType<typeof setTimeout> | undefined

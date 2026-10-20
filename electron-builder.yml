@@ -5,6 +5,8 @@ directories:
 files:
   - out/**
   - package.json
+  # Скиллы агента — раскладываются по ~/.claude/skills и ~/.cursor/rules.
+  - resources/**
 # snx-rs (AGPL): бинари из vendor/snx-rs → Resources/snx-rs (см. scripts/fetch-snx-rs.sh)
 extraResources:
   - from: vendor/snx-rs

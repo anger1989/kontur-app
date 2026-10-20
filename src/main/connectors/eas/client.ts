@@ -476,6 +476,29 @@ export class EasClient {
     return findAll(resp, 'Properties')[0] ?? findAll(resp, 'Fetch').find((f) => findAll(f, 'Body').length) ?? null
   }
 
+  /**
+   * Содержимое вложения по его FileReference (ItemOperations Fetch).
+   *
+   * Сервер отдаёт данные либо строкой base64 (STR_I), либо сырым блоком
+   * (OPAQUE) — поддерживаем оба варианта.
+   */
+  async fetchAttachment(fileReference: string): Promise<{ data: Buffer; mime: string | null }> {
+    const doc = el(20, 'ItemOperations', [
+      el(20, 'Fetch', [el(20, 'Store', 'Mailbox'), el(17, 'FileReference', fileReference)])
+    ])
+    const resp = await this.cmd('ItemOperations', doc)
+    const status = text(resp, 'Status')
+    if (status && status !== '1') {
+      throw new Error(`EAS ItemOperations (вложение) Status=${status}`)
+    }
+    const props = findAll(resp, 'Properties')[0] ?? resp
+    const node = find(props, 'Data')
+    if (!node) throw new Error('Сервер не вернул содержимое вложения')
+    const data = node.data ?? Buffer.from((node.text ?? '').replace(/\s+/g, ''), 'base64')
+    if (!data.length) throw new Error('Вложение пустое')
+    return { data, mime: text(props, 'ContentType') }
+  }
+
   /** Пометить письмо прочитанным/непрочитанным через Sync/Change (Read=1|0). */
   async markRead(collectionId: string, serverId: string, read = true): Promise<void> {
     const syncKey = await this.primeSync(collectionId)

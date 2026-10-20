@@ -1,5 +1,5 @@
 import { useEffect, type RefObject } from 'react'
-import { DOCK_CLEARANCE, DOCK_MAG_CLEARANCE } from '@/lib/deskLayout'
+import { DOCK_MAG_CLEARANCE, shellClearance } from '@/lib/deskLayout'
 import { useStore } from '@/store'
 
 /**
@@ -17,6 +17,16 @@ import { useStore } from '@/store'
 
 /** Совпадает с `rounded-xl` у Window. */
 export const WINDOW_CORNER_RADIUS = 12
+
+/** Breeze почти не скругляет окна — в KDE-оболочке радиус другой. */
+export const KDE_WINDOW_CORNER_RADIUS = 3
+
+/** Радиус окна текущей оболочки: вебвью должен повторять его точь-в-точь. */
+export function useWindowCornerRadius(): number {
+  return useStore((s) =>
+    s.config?.shell === 'kde' ? KDE_WINDOW_CORNER_RADIUS : WINDOW_CORNER_RADIUS
+  )
+}
 
 /**
  * Отступ под DOM-хэндлы ресайза. WebContentsView перехватывает клики, и без
@@ -54,7 +64,7 @@ export function useViewBounds(
     let last = ''
     const pushNow = (): void => {
       const r = el.getBoundingClientRect()
-      const clearance = useStore.getState().dockElevated ? DOCK_MAG_CLEARANCE : DOCK_CLEARANCE
+      const clearance = useStore.getState().dockElevated ? DOCK_MAG_CLEARANCE : shellClearance()
       const deskH = useStore.getState().desktop.height
       const maxBottom = Math.max(0, deskH - clearance)
       let y = Math.round(r.y) + insetTop

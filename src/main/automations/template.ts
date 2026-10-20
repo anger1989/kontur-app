@@ -1,10 +1,14 @@
-/** Подстановка {{key}} из контекста. Неизвестные ключи оставляем как есть. */
-
+/**
+ * Подстановка {{key}} из контекста.
+ *
+ * Неизвестный ключ схлопываем в пустую строку, а не оставляем как есть:
+ * шаги шлют текст наружу (пост в канал, баннер, уведомление), и «{{title}}»
+ * в сообщении для коллег выглядит хуже, чем пустое место.
+ */
 export function renderTemplate(input: string, ctx: Record<string, unknown>): string {
-  return input.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (full, key: string) => {
+  return input.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_full, key: string) => {
     const v = lookup(ctx, key)
-    if (v == null) return full
-    return String(v)
+    return v == null ? '' : String(v)
   })
 }
 

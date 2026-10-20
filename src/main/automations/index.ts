@@ -12,19 +12,27 @@ import {
   setAutomationEnabled,
   upsertAutomation
 } from './store'
-import { runAutomation, tickAutomations } from './runner'
+import { runAutomation, runCronMailPoll, tickAutomations } from './runner'
+import { dispatchNewItems, latestEventContext, listEventTypes, tickCalendarSoon } from './events'
 import { emitAutomationsChanged } from './notify'
+import type { Item } from '@shared/types'
 
 export { bindAutomationsChanged, emitAutomationsChanged } from './notify'
 export { listStepTypes } from './steps'
+export { listEventTypes, dispatchNewItems }
 
 let timer: ReturnType<typeof setInterval> | null = null
 
+async function tickAll(): Promise<void> {
+  await tickAutomations()
+  await tickCalendarSoon()
+}
+
 export function startAutomations(): void {
   if (timer) return
-  void tickAutomations()
-  // Раз в 30с — не пропустить минутный cron при дрейфе таймера.
-  timer = setInterval(() => void tickAutomations(), 30_000)
+  void tickAll()
+  // Раз в 30с — не пропустить минутный cron / calendar.soon при дрейфе таймера.
+  timer = setInterval(() => void tickAll(), 30_000)
   timer.unref?.()
 }
 
@@ -38,12 +46,12 @@ export function listAutomationsView(): AutomationView[] {
   const now = new Date()
   return listAutomations().map((a) => {
     let nextRunAt: number | null = null
-    try {
-      nextRunAt = a.enabled
-        ? nextCronFire(a.schedule.cron, now, a.schedule.tz || 'Europe/Moscow')
-        : null
-    } catch {
-      nextRunAt = null
+    if (a.enabled && a.trigger.type === 'cron') {
+      try {
+        nextRunAt = nextCronFire(a.trigger.cron, now, a.trigger.tz || 'Europe/Moscow')
+      } catch {
+        nextRunAt = null
+      }
     }
     return { ...a, nextRunAt }
   })
@@ -72,7 +80,15 @@ export function automationsGet(id: string): AutomationView | null {
 }
 
 export async function automationsRunNow(id: string): Promise<AutomationRunResult> {
-  return runAutomation(id)
+  const auto = getAutomation(id)
+  if (!auto) throw new Error(`Автоматизация не найдена: ${id}`)
+  // cron+filter — тот же poll непрочитанных, что и по расписанию.
+  if (auto.trigger.type === 'cron' && auto.trigger.filter) {
+    return runCronMailPoll(auto)
+  }
+  // Event: последний подходящий элемент, иначе в канал уйдёт сырой {{title}}.
+  const seed = latestEventContext(auto)
+  return runAutomation(id, seed ?? {})
 }
 
 export function resolveAutomationRef(ref: string): Automation {
@@ -84,6 +100,10 @@ export function resolveAutomationRef(ref: string): Automation {
   if (byName.length === 1) return byName[0]
   if (byName.length > 1) throw new Error(`Несколько автоматизаций с именем «${ref}»`)
   throw new Error(`Автоматизация не найдена: ${ref}`)
+}
+
+export function onNewAttentionItems(items: Item[]): void {
+  void dispatchNewItems(items)
 }
 
 export { getAutomation, listAutomations }

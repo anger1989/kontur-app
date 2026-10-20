@@ -124,6 +124,7 @@ class Scheduler extends EventEmitter {
         ctx,
         (items) => {
           const fresh = upsertItems(items)
+          if (fresh.length) this.emit('fresh-items', fresh)
           if (fresh.length && this.seeded) this.emit('new-items', fresh)
           this.emit('items')
         },
@@ -251,6 +252,7 @@ class Scheduler extends EventEmitter {
 
     this.attachRealtime(service, ctx)
     if (await this.flushOutbox(service)) changed = true
+    if (freshAll.length) this.emit('fresh-items', freshAll)
     if (freshAll.length && this.seeded) this.emit('new-items', freshAll)
     return changed
   }
@@ -316,6 +318,10 @@ class Scheduler extends EventEmitter {
         if (await this.flushOutbox(service)) changed = true
       }
 
+      // fresh-items — для автоматизаций: им нужно и то, что накопилось, пока
+      // Kontur был закрыт. new-items — для баннеров macOS: на первом проходе
+      // они молчат, иначе при старте сыплется вся несинканная история.
+      if (freshAll.length) this.emit('fresh-items', freshAll)
       if (freshAll.length && this.seeded) this.emit('new-items', freshAll)
       this.seeded = true
       if (changed) this.emit('items')

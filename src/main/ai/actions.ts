@@ -1,11 +1,12 @@
 import type { Item, ServiceConfig } from '@shared/types'
 import { getConfig } from '../config/store'
 import { getSecret } from '../config/secrets'
-import { base, getJson, getText, postJson } from '../connectors/http'
+import { base, getJson, getText, HttpError, postJson } from '../connectors/http'
 import {
   MattermostClient,
   type MmChannel,
   type MmChannelMember,
+  type MmPost,
   type MmTeam,
   type MmUser
 } from '../connectors/mattermost/client'
@@ -19,6 +20,7 @@ import {
   getMail,
   listMailFolders,
   listMailRules,
+  markMailReadFully,
   moveMail,
   setMailRuleEnabled,
   upsertMailRule
@@ -113,6 +115,13 @@ export function mailList(opts?: {
  * Прочитать письмо целиком (тело с сервера через getMail).
  * HTML урезаем — агенту обычно хватает text.
  */
+/** Пометить письмо прочитанным (локально + best-effort на сервере). */
+export async function mailMarkRead(id: string): Promise<unknown> {
+  if (!id.includes(':mail:')) throw new Error('Ожидается id письма вида env:service:mail:…')
+  await markMailReadFully(id)
+  return { id, unread: false }
+}
+
 export async function mailRead(id: string): Promise<unknown> {
   if (!id.includes(':mail:')) throw new Error('Ожидается id письма вида env:service:mail:…')
   const d = await getMail(id)
@@ -250,27 +259,237 @@ export async function confluenceCreatePage(
 
 /* ── GitLab ──────────────────────────────────────────────────────── */
 
+/**
+ * GitLab REST v4.
+ *
+ * Merge request адресуется парой «идентификатор проекта — iid»: iid это
+ * номер внутри проекта из ссылки вида `…/-/merge_requests/42`, а не глобальный
+ * id. Сам id проекта агент берёт из карточки MR или из списка ревью.
+ */
+function glMr(
+  envId: string | undefined,
+  projectId: number,
+  mrIid: number
+): { ctx: SyncContext; url: string } {
+  const ctx = ctxFor('gitlab', envId)
+  const root = base(ctx.service.baseUrl)
+  return { ctx, url: `${root}/api/v4/projects/${projectId}/merge_requests/${mrIid}` }
+}
+
+/** Merge request’ы, ждущие моего ревью (по всем проектам сразу). */
 export async function gitlabReviews(envId?: string): Promise<unknown> {
   const ctx = ctxFor('gitlab', envId)
   const root = base(ctx.service.baseUrl)
   return getJson(ctx, `${root}/api/v4/merge_requests?scope=all&reviewer_username=me&state=opened&per_page=30`)
 }
 
-export async function gitlabApproveMr(projectId: number, mrIid: number, envId?: string): Promise<unknown> {
+/** Merge request’ы конкретного проекта с фильтрами. */
+export async function gitlabListMrs(
+  projectId: number,
+  state: 'opened' | 'closed' | 'merged' | 'all' = 'opened',
+  author?: string,
+  search?: string,
+  envId?: string
+): Promise<unknown> {
   const ctx = ctxFor('gitlab', envId)
   const root = base(ctx.service.baseUrl)
-  return postJson(ctx, `${root}/api/v4/projects/${projectId}/merge_requests/${mrIid}/approve`, {})
+  const q = new URLSearchParams({ state, order_by: 'updated_at', sort: 'desc', per_page: '50' })
+  if (author?.trim()) q.set('author_username', author.trim())
+  if (search?.trim()) q.set('search', search.trim())
+  return getJson(ctx, `${root}/api/v4/projects/${projectId}/merge_requests?${q.toString()}`)
 }
 
+/** Карточка merge request’а: описание, ветки, ревьюеры, статус пайплайна. */
+export async function gitlabGetMr(projectId: number, mrIid: number, envId?: string): Promise<unknown> {
+  const { ctx, url } = glMr(envId, projectId, mrIid)
+  return getJson(ctx, url)
+}
+
+/** Один изменённый файл в ответе GitLab: патч без заголовков и флаги состояния. */
+type GitlabDiffFile = {
+  old_path?: string
+  new_path?: string
+  a_mode?: string
+  b_mode?: string
+  diff?: string
+  new_file?: boolean
+  renamed_file?: boolean
+  deleted_file?: boolean
+}
+
+const GITLAB_DIFF_PER_PAGE = 100
+
+/**
+ * Изменённые файлы MR.
+ *
+ * На свежих версиях это `/diffs` с постраничной выдачей, на старых ручки
+ * ещё нет — тогда падаем на `/changes`, где те же файлы лежат целиком внутри
+ * карточки MR.
+ */
+async function gitlabMrFiles(
+  ctx: SyncContext,
+  url: string
+): Promise<{ files: GitlabDiffFile[]; capped: boolean }> {
+  try {
+    const files = await getJson<GitlabDiffFile[]>(ctx, `${url}/diffs?per_page=${GITLAB_DIFF_PER_PAGE}`)
+    return { files, capped: files.length >= GITLAB_DIFF_PER_PAGE }
+  } catch (e) {
+    if (!(e instanceof HttpError) || e.status !== 404) throw e
+    const res = await getJson<{ changes?: GitlabDiffFile[] }>(ctx, `${url}/changes`)
+    return { files: res.changes ?? [], capped: false }
+  }
+}
+
+/**
+ * Diff merge request’а в обычном unified-формате.
+ *
+ * GitLab отдаёт изменения списком файлов, где патч лежит без заголовков, —
+ * собираем из них один текстовый diff, чтобы агент читал его так же, как
+ * у Bitbucket. Ответ подрезаем — целиком крупный MR в контекст всё равно не влезет,
+ * а обрыв лучше делать честно.
+ */
+export async function gitlabMrDiff(
+  projectId: number,
+  mrIid: number,
+  envId?: string
+): Promise<{ diff: string; truncated: boolean }> {
+  const { ctx, url } = glMr(envId, projectId, mrIid)
+  const { files, capped } = await gitlabMrFiles(ctx, url)
+
+  const lines: string[] = []
+  for (const f of files) {
+    const from = f.old_path ?? f.new_path ?? ''
+    const to = f.new_path ?? f.old_path ?? ''
+    lines.push(`diff --git a/${from} b/${to}`)
+    if (f.new_file) lines.push(`new file mode ${f.b_mode ?? '100644'}`)
+    else if (f.deleted_file) lines.push(`deleted file mode ${f.a_mode ?? '100644'}`)
+    else if (f.renamed_file) lines.push(`rename from ${from}`, `rename to ${to}`)
+    lines.push(`--- ${f.new_file ? '/dev/null' : `a/${from}`}`)
+    lines.push(`+++ ${f.deleted_file ? '/dev/null' : `b/${to}`}`)
+    // У бинарных и слишком больших файлов патча нет — остаётся один заголовок.
+    const body = f.diff ?? ''
+    if (body) lines.push(body.endsWith('\n') ? body.slice(0, -1) : body)
+  }
+
+  const raw = lines.join('\n')
+  const LIMIT = 200_000
+  return { diff: raw.slice(0, LIMIT), truncated: capped || raw.length > LIMIT }
+}
+
+/** Обсуждения merge request’а: треды к строкам, общие комментарии и системные записи. */
+export async function gitlabMrDiscussions(
+  projectId: number,
+  mrIid: number,
+  envId?: string
+): Promise<unknown> {
+  const { ctx, url } = glMr(envId, projectId, mrIid)
+  return getJson(ctx, `${url}/discussions?per_page=100`)
+}
+
+export async function gitlabApproveMr(projectId: number, mrIid: number, envId?: string): Promise<unknown> {
+  const { ctx, url } = glMr(envId, projectId, mrIid)
+  return postJson(ctx, `${url}/approve`, {})
+}
+
+/**
+ * Комментарий к merge request’у.
+ *
+ * Без привязки к строке: позиция в GitLab требует тройки sha (base, start,
+ * head), а не пути с номером строки, как у Bitbucket.
+ */
 export async function gitlabCommentMr(
   projectId: number,
   mrIid: number,
   body: string,
   envId?: string
 ): Promise<unknown> {
+  const { ctx, url } = glMr(envId, projectId, mrIid)
+  return postJson(ctx, `${url}/notes`, { body })
+}
+
+/** Короткая карточка проекта GitLab — ровно то, что нужно, чтобы взять id и пойти дальше. */
+export type GitlabProjectBrief = {
+  id: number
+  path: string
+  name: string
+  description: string | null
+  url: string
+  defaultBranch: string | null
+  lastActivityAt: string | null
+  archived: boolean
+}
+
+type GitlabProjectRaw = {
+  id?: number
+  path_with_namespace?: string
+  name?: string
+  description?: string | null
+  web_url?: string
+  default_branch?: string | null
+  last_activity_at?: string | null
+  archived?: boolean
+}
+
+/**
+ * Найти проект (сервис) по имени или пути.
+ *
+ * Идёт через `/projects?search=`, а не через Search API: список проектов есть
+ * в любом GitLab, а глобальный поиск требует Advanced Search. Ответ GitLab
+ * на проект — это полсотни полей, поэтому оставляем только то, по чему выбирают.
+ */
+export async function gitlabFindProject(
+  query: string,
+  envId?: string
+): Promise<GitlabProjectBrief[]> {
   const ctx = ctxFor('gitlab', envId)
   const root = base(ctx.service.baseUrl)
-  return postJson(ctx, `${root}/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`, { body })
+  const q = new URLSearchParams({
+    search: query,
+    order_by: 'last_activity_at',
+    sort: 'desc',
+    per_page: '20'
+  })
+  const list = await getJson<GitlabProjectRaw[]>(ctx, `${root}/api/v4/projects?${q.toString()}`)
+  return list.map((p) => ({
+    id: p.id ?? 0,
+    path: p.path_with_namespace ?? '',
+    name: p.name ?? '',
+    description: p.description ?? null,
+    url: p.web_url ?? '',
+    defaultBranch: p.default_branch ?? null,
+    lastActivityAt: p.last_activity_at ?? null,
+    archived: p.archived === true
+  }))
+}
+
+/**
+ * Поиск по коду (GitLab Search API, scope=blobs).
+ *
+ * Без projectId — глобальный поиск, а он по blobs работает только при включённом
+ * Advanced Search (Elasticsearch); иначе GitLab отвечает 400 «scope does not have a
+ * valid value». Сама по себе эта формулировка агенту ничего не говорит, поэтому
+ * переводим её в совет: сузь поиск до проекта, там blobs есть всегда.
+ */
+export async function gitlabSearchCode(
+  query: string,
+  projectId?: number,
+  envId?: string
+): Promise<unknown> {
+  const ctx = ctxFor('gitlab', envId)
+  const root = base(ctx.service.baseUrl)
+  const q = new URLSearchParams({ scope: 'blobs', search: query, per_page: '25' })
+  const scope = projectId != null ? `/projects/${projectId}` : ''
+  try {
+    return await getJson(ctx, `${root}/api/v4${scope}/search?${q.toString()}`)
+  } catch (e) {
+    if (projectId == null && e instanceof HttpError && e.status === 400) {
+      throw new Error(
+        'В этом GitLab нет Advanced Search, поэтому искать по коду можно только внутри проекта: ' +
+          'передайте projectId (найдите его через gitlab_find_project).'
+      )
+    }
+    throw e
+  }
 }
 
 /* ── Bitbucket ───────────────────────────────────────────────────── */
@@ -500,6 +719,71 @@ export async function mattermostPost(channelId: string, message: string, envId?:
   const post = await api.createPost(resolved, message)
   const team = teams[0]?.name ?? 'team'
   return { id: post.id, channelId: post.channel_id, url: api.permalink(team, post.id) }
+}
+
+/** Отпечаток Grafana-алерта из темы: без [FIRING]/[RESOLVED] и без хвоста labels. */
+export function mattermostAlertFingerprint(title: string): string {
+  let t = title.replace(/^\s*\[(FIRING(?::\d+)?|RESOLVED)\]\s*/i, '')
+  const paren = t.indexOf(' (')
+  if (paren > 0) t = t.slice(0, paren)
+  return t.trim().toLowerCase()
+}
+
+/**
+ * Если тема — [RESOLVED] …, найти в канале свежий FIRING-пост с тем же алертом,
+ * поставить ✅ и дописать RESOLVED в начало сообщения.
+ */
+export async function mattermostMarkAlertResolved(
+  channel: string,
+  title: string,
+  envId?: string
+): Promise<unknown> {
+  if (!/\[RESOLVED\]/i.test(title)) {
+    return { skipped: true, reason: 'title is not RESOLVED' }
+  }
+  const fingerprint = mattermostAlertFingerprint(title)
+  if (!fingerprint || fingerprint.length < 8) {
+    return { skipped: true, reason: 'weak fingerprint' }
+  }
+
+  const { api } = mmClient(envId)
+  const me = await api.me()
+  const teams = await api.myTeams()
+  const channelId = await resolveChannelId(api, channel, teams)
+  const list = await api.posts(channelId, { page: 0, perPage: 60 })
+  const candidates = list.order
+    .map((id) => list.posts[id])
+    .filter((p): p is MmPost => Boolean(p && !p.type && p.message))
+    .filter((p) => {
+      const msg = p.message.toLowerCase()
+      if (!msg.includes(fingerprint)) return false
+      if (/✅\s*\*\*resolved\*\*/i.test(p.message)) return false
+      return /\[firing/i.test(p.message) || /firing/i.test(p.message)
+    })
+
+  if (!candidates.length) {
+    return { skipped: true, reason: 'no matching FIRING post', fingerprint }
+  }
+
+  const target = candidates[0]!
+  let reacted = false
+  try {
+    await api.addReaction(me.id, target.id, 'white_check_mark')
+    reacted = true
+  } catch {
+    /* уже стояла или нет прав — текст всё равно обновим */
+  }
+
+  const stamped = `✅ **RESOLVED**\n${target.message}`
+  const updated = await api.updatePost(target.id, stamped)
+  const team = teams[0]?.name ?? 'team'
+  return {
+    skipped: false,
+    postId: updated.id,
+    reacted,
+    fingerprint,
+    url: api.permalink(team, updated.id)
+  }
 }
 
 /**

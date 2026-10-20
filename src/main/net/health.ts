@@ -5,7 +5,7 @@ import { getConfig } from '../config/store'
 import { outboxCount } from '../db'
 import { logInfo, logWarn } from '../log'
 import { resetDispatcher } from './transport'
-import { maybeAutoApplySplitDns, resetSplitDnsAutoFlag } from './dns'
+import { maybeAutoApplySplitDns, maybeRepairSplitDns, resetSplitDnsAutoFlag } from './dns'
 
 const PROBE_INTERVAL_MS = 20_000
 const PROBE_TIMEOUT_MS = 8_000
@@ -147,6 +147,11 @@ class HealthMonitor extends EventEmitter {
         const streak = (this.failStreak.get(envId) ?? 0) + 1
         this.failStreak.set(envId, streak)
         logWarn('health', `${envId}: ${url} — ${detail} (${streak}/${DOWN_STREAK})`)
+        // Возможно, у контура сменился VPN, а с ним и DNS: пробуем переписать
+        // /etc/resolver (молча, если рабочей замены серверам не нашлось).
+        // Не только на ошибке резолва: мёртвый nameserver молчит, и проба
+        // успевает оборваться по таймауту — снаружи это тот же случай.
+        maybeRepairSplitDns(envId)
         // Уже был up — один фоновый сбой не роняет статус.
         if (!interactive && prev === 'up' && streak < DOWN_STREAK) {
           return 'up'
@@ -211,12 +216,19 @@ class HealthMonitor extends EventEmitter {
   }
 }
 
+const DNS_FAILURE_RE = /ENOTFOUND|EAI_AGAIN|ERR_NAME_NOT_RESOLVED/i
+
+/** Проба не дошла до DNS — имя не разрешилось (а не таймаут маршрута или TLS). */
+function isDnsFailure(err: unknown): boolean {
+  return DNS_FAILURE_RE.test(err instanceof Error ? err.message : String(err))
+}
+
 function explainProbeError(err: unknown): string {
   const name = err instanceof Error ? err.name : ''
   const msg = err instanceof Error ? err.message : String(err)
   if (name === 'AbortError' || /aborted|timeout/i.test(msg))
     return 'Таймаут до адреса проверки — маршрут через VPN не доходит.'
-  if (/ENOTFOUND|EAI_AGAIN|ERR_NAME_NOT_RESOLVED/i.test(msg))
+  if (isDnsFailure(err))
     return 'DNS не резолвит адрес проверки. VPN/split-DNS ещё не готов.'
   if (/CERT_|UNABLE_TO_VERIFY|ERR_CERT|SELF_SIGNED/i.test(msg))
     return `TLS: ${msg.slice(0, 120)}. Включите «Доверять сертификатам контура».`

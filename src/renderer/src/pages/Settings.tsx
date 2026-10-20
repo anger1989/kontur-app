@@ -7,6 +7,7 @@ import type {
   LinkOpenMode,
   SecretMeta,
   ServiceConfig,
+  ShellVariant,
   ThemePref,
   UserProfile,
   Wallpaper,
@@ -912,6 +913,7 @@ function AppearanceTab(): JSX.Element {
             items={options.map((o) => ({ value: o.id, label: o.label }))}
           />
         </Field>
+        <ShellField />
         <Field
           label="Шрифты"
           hint="Интерфейс — Golos Text, моноширинный — IBM Plex Mono, текст заметок — IBM Plex Serif. Шрифты встроены в приложение и не тянутся из сети."
@@ -926,6 +928,37 @@ function AppearanceTab(): JSX.Element {
         <UpdateChecker />
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * Вид интерфейса: привычная связка «строка меню сверху + док снизу» или одна
+ * нижняя панель KDE Plasma с меню «Пуск», списком окон и треем.
+ */
+function ShellField(): JSX.Element {
+  const shell = useStore((s) => s.config?.shell ?? 'macos')
+  const patchConfig = useStore((s) => s.patchConfig)
+  const options: { id: ShellVariant; label: string }[] = [
+    { id: 'macos', label: 'macOS' },
+    { id: 'kde', label: 'KDE Plasma' }
+  ]
+
+  return (
+    <Field
+      label="Вид интерфейса"
+      hint={
+        shell === 'kde'
+          ? 'Одна панель внизу: «Пуск» с поиском приложений, кнопки открытых окон, трей контуров и часы. Нужное закрепляется на панели — булавкой в «Пуске» или правым кликом по кнопке окна. У окон рабочего стола кнопки справа в шапке, как в Breeze; само окно Kontur остаётся обычным окном macOS.'
+          : 'Строка меню сверху и док снизу — как в macOS. Светофор окна приложения на своём месте.'
+      }
+    >
+      <Segmented
+        ariaLabel="Вид интерфейса"
+        value={shell}
+        onChange={(v) => void patchConfig({ shell: v as ShellVariant })}
+        items={options.map((o) => ({ value: o.id, label: o.label }))}
+      />
+    </Field>
   )
 }
 
@@ -1251,15 +1284,29 @@ function AssistantTab(): JSX.Element {
   const [agents, setAgents] = useState<
     { id: string; name: string; detected: boolean; configured: boolean; configPath: string }[]
   >([])
+  const [skills, setSkills] = useState<{
+    skills: { id: string; name: string; description: string }[]
+    installed: { claude: boolean; cursor: boolean }
+    claudeDir: string
+    cursorDir: string
+  } | null>(null)
 
   const reload = (): void => {
     void window.kontur.mcp.info().then(setInfo)
     void window.kontur.mcp.agents().then(setAgents)
+    void window.kontur.mcp.skills().then(setSkills)
   }
   useEffect(reload, [])
 
   const connect = async (id: string): Promise<void> => {
     const r = await window.kontur.mcp.connect(id)
+    if (r.ok) toast.success(r.message)
+    else toast.error(r.message)
+    reload()
+  }
+
+  const installSkills = async (): Promise<void> => {
+    const r = await window.kontur.mcp.installSkills()
     if (r.ok) toast.success(r.message)
     else toast.error(r.message)
     reload()
@@ -1319,6 +1366,45 @@ function AssistantTab(): JSX.Element {
       <p className="mt-3 text-xs text-muted-foreground">
         После подключения перезапустите агента. Claude Desktop и Codex ходят по stdio — для них
         используется мост <span className="font-mono">mcp-remote</span> (нужен Node с npx).
+      </p>
+
+      <h2 className="mt-6 mb-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        Скиллы агента
+      </h2>
+      <Card className="gap-0 overflow-hidden py-0">
+        <div className="flex items-center gap-3 border-b px-4 py-3">
+          <div className="grid min-w-0 flex-1">
+            <span className="text-[13px] font-medium">
+              Инструкции по инструментам Kontur
+            </span>
+            <span className="truncate text-xs text-muted-foreground">
+              MCP даёт агенту инструменты, скиллы — правила: контуры, id писем, когда можно
+              апрувить и писать в каналы.
+            </span>
+          </div>
+          {skills?.installed.claude && skills?.installed.cursor && (
+            <span className="shrink-0 text-xs text-[var(--success)]">установлены</span>
+          )}
+          <Button
+            size="sm"
+            variant={skills?.installed.claude && skills?.installed.cursor ? 'ghost' : 'outline'}
+            onClick={() => void installSkills()}
+          >
+            {skills?.installed.claude && skills?.installed.cursor ? 'Обновить' : 'Установить'}
+          </Button>
+        </div>
+        {(skills?.skills ?? []).map((sk, i, arr) => (
+          <div key={sk.id} className={`px-4 py-2.5 ${i < arr.length - 1 ? 'border-b' : ''}`}>
+            <div className="font-mono text-xs text-foreground">{sk.name}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">{sk.description}</div>
+          </div>
+        ))}
+      </Card>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Раскладываются в <span className="font-mono">~/.claude/skills</span> (Claude Code и
+        Desktop) и <span className="font-mono">~/.cursor/rules</span> (Cursor и встроенный
+        ассистент). Файлы перезаписываются целиком — правки в них не сохранятся, скиллы приезжают
+        с версией Kontur.
       </p>
     </>
   )

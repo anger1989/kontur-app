@@ -1,5 +1,7 @@
+import { Notification } from 'electron'
 import type { AutomationStepTypeInfo } from '@shared/automations'
 import * as actions from '../../ai/actions'
+import { getConfig } from '../../config/store'
 import { resolveDutyFromMarkdown } from './dutyResolve'
 import { renderParams } from '../template'
 
@@ -62,6 +64,66 @@ const catalog: AutomationStepTypeInfo[] = [
       header: { type: 'string', description: 'Текст шапки', required: true },
       env: { type: 'string', description: 'Контур (опционально)' }
     }
+  },
+  {
+    type: 'mattermost.post',
+    title: 'Пост в Mattermost',
+    description:
+      'Пишет сообщение в канал от твоего аккаунта. Текст поддерживает {{title}}, {{author}}, {{url}}, …',
+    params: {
+      channel: { type: 'string', description: 'Id, имя или URL канала', required: true },
+      message: { type: 'string', description: 'Текст поста (markdown)', required: true },
+      env: { type: 'string', description: 'Контур bank/ecom/shared (опционально)' }
+    }
+  },
+  {
+    type: 'mattermost.mark_alert_resolved',
+    title: 'Пометить FIRING как RESOLVED',
+    description:
+      'Если {{title}} содержит [RESOLVED] — находит свежий FIRING-пост с тем же алертом, ставит ✅ и дописывает RESOLVED. Иначе no-op.',
+    params: {
+      channel: { type: 'string', description: 'Id, имя или URL канала', required: true },
+      title: {
+        type: 'string',
+        description: 'Тема письма/алерта (обычно {{title}})',
+        required: true
+      },
+      env: { type: 'string', description: 'Контур (опционально)' }
+    }
+  },
+  {
+    type: 'notify',
+    title: 'Уведомление macOS',
+    description: 'Системный баннер. Учитывает настройку notifications в Kontur.',
+    params: {
+      title: { type: 'string', description: 'Заголовок', required: true },
+      body: { type: 'string', description: 'Текст', required: true }
+    }
+  },
+  {
+    type: 'todos.create',
+    title: 'Создать дело',
+    description: 'Локальный todo Kontur. title/note поддерживают {{vars}}.',
+    params: {
+      title: { type: 'string', description: 'Название', required: true },
+      note: { type: 'string', description: 'Заметка (опционально)' },
+      dueAt: { type: 'string', description: 'Срок ISO-8601 (опционально)' },
+      remindAt: { type: 'string', description: 'Напоминание ISO-8601 (опционально)' },
+      showInCalendar: { type: 'boolean', description: 'Показать в календаре', default: false }
+    }
+  },
+  {
+    type: 'mail.mark_read',
+    title: 'Пометить письмо прочитанным',
+    description:
+      'Снимает unread с текущего письма ({{item.id}}) или с id из params. Для cron+filter делается и так после успеха.',
+    params: {
+      id: {
+        type: 'string',
+        description: 'Id письма (по умолчанию {{item.id}} из контекста)',
+        required: false
+      }
+    }
   }
 ]
 
@@ -120,6 +182,78 @@ const handlers: Record<string, StepHandler> = {
       patch: { headerResult: result },
       summary: `шапка → ${channel}`
     }
+  },
+
+  async 'mattermost.post'(params) {
+    const channel = String(params.channel ?? '').trim()
+    const message = String(params.message ?? '')
+    if (!channel) throw new Error('mattermost.post: нужен channel')
+    if (!message.trim()) throw new Error('mattermost.post: нужен message')
+    const env = params.env != null ? String(params.env) : undefined
+    const result = await actions.mattermostPost(channel, message, env)
+    return {
+      patch: { postResult: result },
+      summary: `пост → ${channel}`
+    }
+  },
+
+  async 'mattermost.mark_alert_resolved'(params) {
+    const channel = String(params.channel ?? '').trim()
+    const title = String(params.title ?? '')
+    if (!channel) throw new Error('mattermost.mark_alert_resolved: нужен channel')
+    const env = params.env != null ? String(params.env) : undefined
+    const result = (await actions.mattermostMarkAlertResolved(channel, title, env)) as {
+      skipped?: boolean
+      reason?: string
+      postId?: string
+    }
+    if (result.skipped) {
+      return { patch: { resolveResult: result }, summary: `resolve skip: ${result.reason ?? 'ok'}` }
+    }
+    return {
+      patch: { resolveResult: result },
+      summary: `resolve → ${result.postId ?? channel}`
+    }
+  },
+
+  async 'notify'(params) {
+    const title = String(params.title ?? '').trim()
+    const body = String(params.body ?? '')
+    if (!title) throw new Error('notify: нужен title')
+    if (!Notification.isSupported()) {
+      return { summary: 'notify: не поддерживается' }
+    }
+    if (!getConfig().notifications) {
+      return { summary: 'notify: выключены в настройках' }
+    }
+    new Notification({ title, body, silent: false }).show()
+    return { summary: `notify: ${title}` }
+  },
+
+  async 'todos.create'(params) {
+    const title = String(params.title ?? '').trim()
+    if (!title) throw new Error('todos.create: нужен title')
+    const note = params.note != null ? String(params.note) : undefined
+    const dueAt = params.dueAt != null ? String(params.dueAt) : undefined
+    const remindAt = params.remindAt != null ? String(params.remindAt) : undefined
+    const showInCalendar = params.showInCalendar === true
+    const result = actions.todosCreate({ title, note, dueAt, remindAt, showInCalendar })
+    return {
+      patch: { todo: result },
+      summary: `todo: ${title}`
+    }
+  },
+
+  async 'mail.mark_read'(params, ctx) {
+    const fromParams = params.id != null ? String(params.id).trim() : ''
+    const fromItem =
+      ctx.item && typeof ctx.item === 'object' && ctx.item !== null && 'id' in ctx.item
+        ? String((ctx.item as { id?: unknown }).id ?? '').trim()
+        : ''
+    const id = fromParams || fromItem
+    if (!id) throw new Error('mail.mark_read: нужен id письма (params.id или item.id)')
+    await actions.mailMarkRead(id)
+    return { summary: `прочитано ${id.slice(-12)}` }
   }
 }
 

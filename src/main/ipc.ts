@@ -23,6 +23,9 @@ import { queryItems, searchItems, markItemsRead, type ItemQuery } from './db'
 import { bindItemsChanged, emitItemsChanged } from './notify/itemsChanged'
 import {
   getMail,
+  openMailAttachment,
+  pickMailAttachments,
+  saveMailAttachment,
   sendMail,
   markMailRead,
   markMailUnread,
@@ -66,6 +69,7 @@ import { createPtySession, killPty, resizePty, writePty } from './terminal/pty'
 import { getKeyboardLayout } from './keyboardLayout'
 import { mcpInfo } from './ai/mcpServer'
 import { agentStates, connectAgent, type AgentId } from './ai/agents'
+import { installSkills, skillsState } from './ai/skills'
 import { grabSessionToken } from './connectors/sessionToken'
 import { notifyTest, rebuildTrayMenu } from './tray'
 import { checkForUpdate, openUpdateDownload } from './update/check'
@@ -265,6 +269,17 @@ export function registerIpc(getWin: () => BrowserWindow | null, views: () => Ser
     return n
   })
   ipcMain.handle(CH.mailGet, (_e, id: string) => getMail(id))
+  ipcMain.handle(
+    CH.mailAttachmentOpen,
+    (_e, itemId: string, attachment: { id: string; name: string }) =>
+      openMailAttachment(itemId, attachment)
+  )
+  ipcMain.handle(
+    CH.mailAttachmentSave,
+    (_e, itemId: string, attachment: { id: string; name: string }) =>
+      saveMailAttachment(getWin(), itemId, attachment)
+  )
+  ipcMain.handle(CH.mailPickAttachments, () => pickMailAttachments(getWin()))
   ipcMain.handle(CH.mailSend, async (_e, payload: MailSendPayload) => {
     try {
       await sendMail(payload)
@@ -424,6 +439,8 @@ export function registerIpc(getWin: () => BrowserWindow | null, views: () => Ser
   ipcMain.handle(CH.mcpInfo, () => mcpInfo())
   ipcMain.handle(CH.mcpAgents, () => agentStates())
   ipcMain.handle(CH.mcpConnect, (_e, id: AgentId) => connectAgent(id))
+  ipcMain.handle(CH.mcpSkills, () => skillsState())
+  ipcMain.handle(CH.mcpInstallSkills, () => installSkills())
 
   ipcMain.handle(CH.grabSessionToken, async (_e, serviceId: string) => {
     if (!getConfig().services.find((s) => s.id === serviceId)) throw new Error('Сервис не найден')
@@ -556,6 +573,17 @@ export function registerIpc(getWin: () => BrowserWindow | null, views: () => Ser
     if (err) throw new Error(err)
   })
   ipcMain.handle(CH.notifyTest, () => notifyTest())
+
+  /* ── Окно приложения ─────────────────────────────────────────────── */
+  ipcMain.handle(CH.windowIsFullScreen, () => {
+    const win = getWin()
+    return Boolean(win && !win.isDestroyed() && win.isFullScreen())
+  })
+  ipcMain.handle(CH.windowClose, () => {
+    const win = getWin()
+    if (!win || win.isDestroyed()) return
+    win.close()
+  })
 
   ipcMain.handle(
     CH.terminalCreate,

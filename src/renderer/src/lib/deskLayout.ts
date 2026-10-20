@@ -11,13 +11,42 @@ export const DOCK_CLEARANCE = 90
  */
 export const DOCK_MAG_CLEARANCE = 156
 
-/** Геометрия развёрнутого окна — на весь стол; зазор под док только у вебвью. */
+/** Панель KDE прижата к низу и не растёт: h-11 (44) + граница. */
+export const KDE_PANEL_CLEARANCE = 45
+
+/**
+ * Сколько пикселей снизу занимает оболочка. У macOS это док, у KDE — панель,
+ * поэтому значение не константа: его выставляет store при смене вида
+ * интерфейса (см. `setShellLayout`), а геометрия окон и клип вебвью
+ * спрашивают его здесь — одним местом на весь рендерер.
+ *
+ * Разница не только в высоте. Док macOS плавает над столом, и развёрнутое
+ * окно уходит под него целиком; панель KDE, как в Plasma, занимает полосу
+ * экрана — развёрнутое окно упирается в неё снизу.
+ */
+let bottomClearance = DOCK_CLEARANCE
+let panelReservesSpace = false
+
+export function shellClearance(): number {
+  return bottomClearance
+}
+
+export function setShellLayout(shell: 'macos' | 'kde'): void {
+  bottomClearance = shell === 'kde' ? KDE_PANEL_CLEARANCE : DOCK_CLEARANCE
+  panelReservesSpace = shell === 'kde'
+}
+
+/**
+ * Геометрия развёрнутого окна. В macOS — на весь стол (зазор под плавающий
+ * док вырезается только у вебвью), в KDE — до верхнего края панели.
+ */
 export function maximizedRect(desktop: { width: number; height: number }): DeskRect {
+  const height = panelReservesSpace ? desktop.height - bottomClearance : desktop.height
   return {
     x: 0,
     y: 0,
     width: desktop.width,
-    height: Math.max(MIN_WIN_HEIGHT, desktop.height)
+    height: Math.max(MIN_WIN_HEIGHT, height)
   }
 }
 
@@ -44,7 +73,7 @@ export function fitRect(
   minWidth = MIN_WIN_WIDTH,
   minHeight = MIN_WIN_HEIGHT
 ): DeskRect {
-  const maxBottom = Math.max(minHeight, desktop.height - DOCK_CLEARANCE)
+  const maxBottom = Math.max(minHeight, desktop.height - shellClearance())
   const width = Math.max(Math.min(rect.width, desktop.width), Math.min(minWidth, desktop.width))
   const height = Math.max(Math.min(rect.height, maxBottom), Math.min(minHeight, maxBottom))
   return {
@@ -78,7 +107,7 @@ export function clampServiceRect(
   minWidth: number,
   minHeight: number
 ): DeskRect {
-  const maxBottom = desktop.height - DOCK_CLEARANCE
+  const maxBottom = desktop.height - shellClearance()
   let { x, y, width, height } = rect
   width = Math.max(minWidth, Math.min(width, desktop.width))
   height = Math.max(minHeight, Math.min(height, Math.max(minHeight, maxBottom)))
@@ -100,7 +129,7 @@ export function peekRects(
   desktop: { width: number; height: number }
 ): DeskRect[] {
   const edges = ['left', 'right', 'top'] as const
-  const usableH = Math.max(120, desktop.height - DOCK_CLEARANCE)
+  const usableH = Math.max(120, desktop.height - shellClearance())
   const byEdge: Record<(typeof edges)[number], number[]> = {
     left: [],
     right: [],
